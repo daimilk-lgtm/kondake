@@ -65,6 +65,10 @@ st.markdown("""
     }
     .category-label { font-size: 0.8rem; font-weight: 400; color: #999; margin-bottom: 5px; }
     .item-row { font-size: 1.1rem; font-weight: 300; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
+    /* プレビュー用テーブルのスタイル */
+    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 30px; border-radius: 12px; overflow: hidden; border: 1px solid #eee; }
+    .preview-table th { background: #fafafa; font-weight: 400; color: #666; padding: 10px; border: 1px solid #eee; }
+    .preview-table td { padding: 10px; border: 1px solid #eee; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -100,26 +104,28 @@ with tab_plan:
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         st.divider()
         
-        # --- データ集計ロジック ---
+        # --- データ集計 & プレビュー表生成 ---
         all_ings_list = []
-        plan_table_html = '<table style="width:100%; border-collapse:collapse; margin-bottom:20px; font-size:0.8rem; border:1px solid #eee;">'
-        plan_table_html += '<tr style="background:#fafafa;"><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>'
+        preview_html = '<table class="preview-table">'
+        preview_html += '<tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>'
         
         for i, (d_str, v) in enumerate(weekly_plan.items()):
-            day_dishes = []
+            day_items = []
             for cat, dish in v.items():
                 if dish != "なし":
-                    day_dishes.append(dish)
+                    day_items.append(dish)
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     items = str(ing_raw).replace("、", ",").split(",")
                     all_ings_list.extend([x.strip() for x in items if x.strip()])
             
-            # 献立表の行を作成
-            main_dishes = f"{v.get('主菜1','-')} / {v.get('主菜2','-')}".replace("なし", "-")
-            sub_dishes = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
-            plan_table_html += f'<tr><td style="border:1px solid #eee; padding:5px;">{d_str}({day_labels[i]})</td><td style="border:1px solid #eee; padding:5px;">{main_dishes}</td><td style="border:1px solid #eee; padding:5px;">{sub_dishes}</td></tr>'
-        
-        plan_table_html += '</table>'
+            m_dish = f"{v.get('主菜1','-')} / {v.get('主菜2','-')}".replace("なし", "-")
+            s_dish = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
+            preview_html += f'<tr><td>{d_str}({day_labels[i]})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
+        preview_html += '</table>'
+
+        # 画面上に献立一覧を表示（チェック用）
+        st.markdown("### 📋 今週の献立チェック")
+        st.markdown(preview_html, unsafe_allow_html=True)
 
         if all_ings_list:
             counts = pd.Series(all_ings_list).value_counts()
@@ -134,30 +140,27 @@ with tab_plan:
             
             df_res = pd.DataFrame(result_data).sort_values("cat")
 
-            # 買い物カードHTML生成
             cards_html = ""
             for cat, group in df_res.groupby("cat"):
-                items_html = "".join([f'<div style="font-size:1.1rem; padding:4px 0; border-bottom:0.5px solid #f9f9f9;">□ {row["name"]}</div>' for _, row in group.iterrows()])
-                cards_html += f'<div style="border:1px solid #eee; padding:15px; border-radius:12px; margin-bottom:10px; break-inside:avoid;"><div style="font-size:0.8rem; color:#999;">{cat}</div>{items_html}</div>'
+                items_html = "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()])
+                cards_html += f'<div class="shopping-card"><div class="category-label">{cat}</div>{items_html}</div>'
             
-            memo_html = '<div style="margin-top:20px; padding:20px; border:1px dashed #ccc; border-radius:10px; min-height:100px;"><div style="font-size:0.9rem; color:#999;">MEMO</div></div>'
+            memo_html = '<div class="memo-space"><div class="memo-title">MEMO</div></div>'
 
-            # --- 画面表示 ---
             st.markdown("### 🛒 買い物リスト")
             st.markdown(cards_html + memo_html, unsafe_allow_html=True)
             
-            # 印刷用隠しエリア（献立表 + 買い物リスト + メモ）
-            printable_content = f'<div id="printable-area"><h2 style="text-align:center; font-weight:100;">献だけ</h2><p style="text-align:right; font-size:0.8rem;">{start_date.strftime("%Y/%m/%d")} 週</p><h4 style="border-bottom:1px solid #333;">今週の献立</h4>{plan_table_html}<h4 style="border-bottom:1px solid #333;">買い物リスト</h4>{cards_html}{memo_html}</div>'
+            # 印刷用データ（献立表込）
+            printable_content = f'<div id="printable-area"><h2 style="text-align:center; font-weight:100;">献だけ</h2><p style="text-align:right;">{start_date.strftime("%Y/%m/%d")} 週</p><h4>今週の献立</h4><table style="width:100%; border-collapse:collapse; border:1px solid #ccc;">{preview_html.replace("class=\\"preview-table\\"", "style=\\"width:100%; border-collapse:collapse;\\"")}</table><h4>買い物リスト</h4>{cards_html}{memo_html}</div>'
             st.markdown(f'<div style="display:none;">{printable_content}</div>', unsafe_allow_html=True)
             
-            # 印刷ボタン
             st.components.v1.html(f"""
                 <script>
                 function printList() {{
                     var content = window.parent.document.getElementById("printable-area").innerHTML;
                     var win = window.open('', '', 'height=700,width=900');
                     win.document.write('<html><head><title>印刷</title>');
-                    win.document.write('<style>body{{font-family:"Noto Sans JP",sans-serif; padding:20px; color:#333;}} table{{width:100%; border-collapse:collapse;}} th,td{{border:1px solid #eee; padding:5px; text-align:left;}}</style>');
+                    win.document.write('<style>body{{font-family:"Noto Sans JP",sans-serif; padding:20px;}} table{{width:100%; border-collapse:collapse; margin-bottom:20px;}} th,td{{border:1px solid #eee; padding:8px; text-align:left;}} .shopping-card{{border:1px solid #eee; padding:15px; border-radius:12px; margin-bottom:10px;}} .category-label{{font-size:0.8rem; color:#999;}} .item-row{{font-size:1.1rem; padding:4px 0; border-bottom:0.5px solid #f9f9f9;}} .memo-space{{margin-top:20px; padding:20px; border:1px dashed #ccc; border-radius:10px; min-height:100px;}}</style>');
                     win.document.write('</head><body>');
                     win.document.write(content);
                     win.document.write('</body></html>');
@@ -165,13 +168,11 @@ with tab_plan:
                     win.print();
                 }}
                 </script>
-                <button onclick="printList()" style="width:100%; padding:12px; background:#333; color:white; border:none; border-radius:10px; cursor:pointer; font-weight:bold;">この内容をA4印刷する</button>
-            """, height=65)
-        else:
-            st.info("メニューを選択してください。")
+                <button onclick="printList()" style="width:100%; padding:15px; background:#333; color:white; border:none; border-radius:10px; cursor:pointer; font-weight:bold; margin-top:20px;">この内容をA4印刷する</button>
+            """, height=80)
 
 with tab_manage:
-    st.subheader("⚙️ メニュー登録")
+    st.subheader("⚙️ メニュー管理")
     with st.form("add", clear_on_submit=True):
         n = st.text_input("料理名")
         c = st.selectbox("カテゴリー", cats)

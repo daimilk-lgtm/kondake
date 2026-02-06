@@ -1,25 +1,50 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import requests
+import base64
 from datetime import datetime, timedelta
 
-# --- 1. データの読み込み ---
-@st.cache_data
-def get_clean_df():
-    try:
-        df = pd.read_csv("menu.csv")
-        df["カテゴリー"] = df["カテゴリー"].str.strip()
-        return df
-    except Exception as e:
-        st.error(f"ファイル読み込みエラー: {e}")
-        return pd.DataFrame()
+# --- 1. GitHub連携設定 ---
+TOKEN = st.secrets.get("GITHUB_TOKEN")
+REPO = st.secrets.get("GITHUB_REPO")
+FILE_PATH = st.secrets.get("GITHUB_FILE", "menu.csv")
 
-df_master = get_clean_df()
+# GitHubからCSVを読み込む関数
+@st.cache_data(ttl=60)
+def get_csv_from_github():
+    url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
+    headers = {"Authorization": f"token {TOKEN}"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        content = base64.b64decode(res.json()["content"]).decode("utf-8-sig")
+        from io import StringIO
+        df = pd.read_csv(StringIO(content))
+        df["カテゴリー"] = df["カテゴリー"].str.strip()
+        return df, res.json()["sha"]
+    return pd.DataFrame(), None
+
+# GitHubのCSVを更新する関数
+def update_github_csv(df, sha):
+    url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
+    headers = {"Authorization": f"token {TOKEN}"}
+    # CSVを文字列にしてBase64エンコード
+    content_base64 = base64.b64encode(df.to_csv(index=False).encode("utf-8-sig")).decode("utf-8")
+    data = {
+        "message": "Update menu via app",
+        "content": content_base64,
+        "sha": sha
+    }
+    res = requests.put(url, headers=headers, json=data)
+    return res.status_code == 200
+
+# データの初期読み込み
+df_master, current_sha = get_csv_from_github()
 conn = sqlite3.connect(':memory:', check_same_thread=False)
 if not df_master.empty:
     df_master.to_sql('menu_table', conn, index=False, if_exists='replace')
 
-# --- 2. 画面デザイン・仕様の反映 ---
+# --- 2. デザイン設定 ---
 st.set_page_config(page_title="献だけ", layout="wide")
 st.markdown("""
 <style>
@@ -36,77 +61,14 @@ st.markdown("""
 <div class="title-wrapper"><div class="title-text">献だけ</div></div>
 """, unsafe_allow_html=True)
 
-# 作成日（自動）
 today = datetime.now()
 st.markdown(f'<div class="date-text">作成日: {today.strftime("%Y/%m/%d")}</div>', unsafe_allow_html=True)
 
-# --- 3. 日付入力と献立作成 ---
-if not df_master.empty:
-    # ユーザーに開始日（日曜日）を選択させる
-    st.subheader("📅 期間設定")
-    start_date = st.date_input("開始日（日曜日）を選択してください", 
-                               value=(today - timedelta(days=(today.weekday() + 1) % 7)),
-                               help="ここに入力した日付から1週間分の日付が自動計算されます")
+# --- 3. メインタブ構成 ---
+main_tab1, main_tab2 = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"])
 
-    # 日曜スタートのラベル作成
-    day_names = ["日", "月", "火", "水", "木", "金", "土"]
-    tabs_labels = []
-    days_with_date = []
-    for i in range(7):
-        d = start_date + timedelta(days=i)
-        tabs_labels.append(f"{day_names[i]} ({d.strftime('%m/%d')})")
-        days_with_date.append(f"{day_names[i]}({d.strftime('%m/%d')})")
-
-    st_tabs = st.tabs(tabs_labels)
-    categories = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
-
-    selected_plan = {}
-    for i, tab in enumerate(st_tabs):
-        with tab:
-            cols = st.columns(5)
-            day_plan = {}
-            for j, cat in enumerate(categories):
-                with cols[j]:
-                    query = f"SELECT 料理名 FROM menu_table WHERE カテゴリー = '{cat}'"
-                    options = pd.read_sql(query, conn)["料理名"].tolist()
-                    val = st.selectbox(cat, ["選択なし"] + options, key=f"sel_{i}_{cat}")
-                    day_plan[cat] = val
-            selected_plan[days_with_date[i]] = day_plan
-
-    st.divider()
-    st.subheader("📝 フリーメモ")
-    user_memo = st.text_area("メモ", placeholder="追加の買い物など", key="free_memo")
-
-    if st.button("こんだけ作成", type="primary", use_container_width=True):
-        st.divider()
-        
-        # 1. 今週の献立 (縦並び / 細字タイトル)
-        st.markdown('<div class="thin-title">今週の献立</div>', unsafe_allow_html=True)
-        st.table(pd.DataFrame(selected_plan).T)
-        
-        # 2. 買い物リスト (縦並び / 細字タイトル)
-        st.markdown('<div class="thin-title">買い物リスト</div>', unsafe_allow_html=True)
-        
-        if user_memo:
-            st.info(f"【追加メモ】\n{user_memo}")
-            
-        raw_ings = []
-        for dishes in selected_plan.values():
-            for dish_name in dishes.values():
-                if dish_name != "選択なし":
-                    match = df_master[df_master["料理名"] == dish_name]
-                    if not match.empty:
-                        ing = match["材料"].iloc[0]
-                        if pd.notna(ing):
-                            items = str(ing).replace("、", "\n").replace(",", "\n").splitlines()
-                            raw_ings.extend([x.strip() for x in items if x.strip()])
-
-        if raw_ings:
-            ing_counts = pd.Series(raw_ings).value_counts().sort_index()
-            for name, count in ing_counts.items():
-                display_name = f"{name} × {count}" if count > 1 else name
-                st.checkbox(display_name, key=f"check_{name}")
-        elif not user_memo:
-            st.info("メニューを選択してください")
-else:
-    st.warning("menu.csv を読み込めません。")
+# --- タブ1: 献立作成 ---
+with main_tab1:
+    if not df_master.empty:
+        # 日曜スタートの日付設定
+        start_date = st.date_input("開始日（日曜日）

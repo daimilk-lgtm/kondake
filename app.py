@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.0.3"  # 履歴保存機能を追加
+VERSION = "1.0.4"  # 履歴に曜日追加 & タブを独立化
 
 import streamlit as st
 import pandas as pd
@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
-HIST_FILE = "history.csv"  # 履歴保存用のファイル
+HIST_FILE = "history.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
 @st.cache_data(ttl=60)
@@ -39,9 +39,9 @@ def get_history_data():
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             return pd.read_csv(io.StringIO(raw)), r.json()["sha"]
         else:
-            return pd.DataFrame(columns=["日付", "料理名"]), None
+            return pd.DataFrame(columns=["日付", "曜日", "料理名"]), None
     except:
-        return pd.DataFrame(columns=["日付", "料理名"]), None
+        return pd.DataFrame(columns=["日付", "曜日", "料理名"]), None
 
 @st.cache_data(ttl=60)
 def get_dict_data():
@@ -87,7 +87,10 @@ df_menu, menu_sha = get_menu_data()
 df_dict = get_dict_data()
 df_hist, hist_sha = get_history_data()
 
-tab_plan, tab_manage = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"])
+# --- タブ構成の変更 ---
+tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
+
+day_labels = ["日", "月", "火", "水", "木", "金", "土"]
 
 with tab_plan:
     today = datetime.now()
@@ -95,17 +98,18 @@ with tab_plan:
     default_sun = today - timedelta(days=offset)
     start_date = st.date_input("開始日（日）", value=default_sun)
 
-    day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
     cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
     weekly_plan = {}
 
     for i, day_tab in enumerate(days_tabs):
-        d_str = (start_date + timedelta(days=i)).strftime("%Y/%m/%d")
+        target_date = start_date + timedelta(days=i)
+        d_str = target_date.strftime("%Y/%m/%d")
+        w_str = day_labels[i]
         with day_tab:
-            st.markdown(f"##### {d_str} ({day_labels[i]})")
+            st.markdown(f"##### {d_str} ({w_str})")
             day_menu = {cat: st.selectbox(cat, ["なし"] + df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist(), key=f"s_{i}_{cat}") for cat in cats}
-            weekly_plan[d_str] = day_menu
+            weekly_plan[d_str] = {"menu": day_menu, "weekday": w_str}
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         st.divider()
@@ -113,28 +117,34 @@ with tab_plan:
         all_ings_list = []
         rows_html = ""
         
-        for i, (d_str, v) in enumerate(weekly_plan.items()):
+        for d_str, data in weekly_plan.items():
             day_dishes = []
+            v = data["menu"]
+            w_str = data["weekday"]
             for dish in v.values():
                 if dish != "なし":
                     day_dishes.append(dish)
-                    new_history_entries.append({"日付": d_str, "料理名": dish})
+                    new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     items = str(ing_raw).replace("、", ",").split(",")
                     all_ings_list.extend([x.strip() for x in items if x.strip()])
             
             m_dish = f"{v.get('主菜1','-')} / {v.get('主菜2','-')}".replace("なし", "-")
             s_dish = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
-            rows_html += f'<tr><td>{d_str}</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
+            rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
 
-        # 履歴をGitHubに保存
         if new_history_entries:
+            # 曜日列がない古い履歴がある場合の対策
+            if "曜日" not in df_hist.columns:
+                df_hist["曜日"] = ""
             new_hist_df = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
-            save_to_github(new_hist_df, HIST_FILE, "Update history", hist_sha)
+            save_to_github(new_hist_df, HIST_FILE, "Update history with weekday", hist_sha)
             st.success("履歴を保存しました")
 
         st.markdown("### 📋 今週の献立チェック")
         st.markdown(f'<table class="preview-table"><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table>', unsafe_allow_html=True)
+        # 印刷用スクリプト（既存仕様維持）
+        st.button("A4印刷する", on_click=lambda: st.write('<script>window.print();</script>', unsafe_allow_html=True))
 
         if all_ings_list:
             counts = pd.Series(all_ings_list).value_counts()
@@ -151,10 +161,14 @@ with tab_plan:
             st.markdown("### 🛒 買い物リスト")
             st.markdown(cards_html, unsafe_allow_html=True)
 
-    st.divider()
+with tab_hist:
     st.subheader("過去の履歴")
     if not df_hist.empty:
-        st.dataframe(df_hist.sort_values("日付", ascending=False), use_container_width=True, hide_index=True)
+        # 日付と曜日が見えやすいように並び替え
+        display_hist = df_hist.copy()
+        if "曜日" in display_hist.columns:
+            display_hist = display_hist[["日付", "曜日", "料理名"]]
+        st.dataframe(display_hist.sort_values("日付", ascending=False), use_container_width=True, hide_index=True)
     else:
         st.info("まだ履歴はありません。")
 

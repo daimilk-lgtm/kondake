@@ -3,47 +3,31 @@ import pandas as pd
 from gspread_pandas import Spread
 from google.oauth2.service_account import Credentials
 
-# --- 1. 接続・認証（PM視点：安定性の確保） ---
+# --- 1. 接続設定（安定性重視） ---
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
 @st.cache_data(ttl=60)
 def get_data():
     try:
         creds_dict = dict(st.secrets)
-        # PEM鍵の正規化：接続エラーを未然に防ぐ
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         spread = Spread("献だけデータ", creds=creds)
         df = spread.sheet_to_df(index=None)
         return spread, df
-    except Exception as e:
+    except:
         return None, pd.DataFrame(columns=["料理名", "カテゴリー", "材料"])
 
 spread, df_master = get_data()
 
-# --- 2. デザイナー視点：視覚設計（細字・丸み・中央タイトル） ---
+# --- 2. UI設計（仕様書準拠：中央タイトル・太字NG） ---
 st.set_page_config(page_title="献だけ", layout="wide")
 
-# CSSでフォントとデザインを制御（太字禁止・丸みフォント）
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap');
-    html, body, [class*="css"]  {
-        font-family: 'Noto Sans JP', sans-serif !important;
-        font-weight: 300 !important;
-    }
-    h1 {
-        text-align: center;
-        font-weight: 300 !important;
-        font-size: 2.5rem;
-        margin-bottom: 2rem;
-    }
-    </style>
-    """, unsafe_content_html=True)
+# タイトルを中央寄せにするための最小限の安全な記述
+st.markdown("<h1 style='text-align: center; font-weight: 300;'>献 だけ</h1>", unsafe_content_html=True)
 
-st.markdown("<h1>献 だけ</h1>", unsafe_content_html=True)
-
-# --- 3. プロデューサー視点：献立計画機能 ---
+# --- 3. 献立計画（仕様書：主菜2・副菜2・汁物の5項目） ---
 tabs_list = ["月", "火", "水", "木", "金", "土", "日"]
 st_tabs = st.tabs(tabs_list)
 categories = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
@@ -56,59 +40,66 @@ for i, tab in enumerate(st_tabs):
         day_plan = {}
         for j, cat in enumerate(categories):
             with cols[j]:
-                options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist() if not df_master.empty else []
+                options = []
+                if not df_master.empty:
+                    options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist()
+                
+                # ユーザーが混乱しないよう、標準の細字セレクトボックス
                 val = st.selectbox(cat, ["選択なし"] + options, key=f"{tabs_list[i]}_{cat}")
                 day_plan[cat] = val
         selected_plan[tabs_list[i]] = day_plan
 
-# --- 4. 1週間のメニュー表と買い物リスト（主婦層ターゲットの実用的機能） ---
+# --- 4. 買い物リストとメニュー表（主婦層向け必須機能） ---
 st.write("---")
 if st.button("1週間のメニュー表と買い物リストを作成"):
     col_a, col_b = st.columns(2)
     
     all_ingredients = []
     with col_a:
-        st.write("🗓 1週間のメニュー表")
-        summary_data = []
+        st.write("🗓 メニュー表")
+        summary = []
         for day, dishes in selected_plan.items():
             row = {"曜日": day}
             row.update(dishes)
-            summary_data.append(row)
-            # 材料集計ロジック
-            for dish_name in dishes.values():
-                if dish_name != "選択なし":
-                    ing = df_master[df_master["料理名"] == dish_name]["材料"].iloc[0]
-                    if ing:
-                        all_ingredients.extend([x.strip() for x in ing.replace("、", "\n").splitlines() if x.strip()])
+            summary.append(row)
+            # 材料データの紐付け
+            for dish in dishes.values():
+                if dish != "選択なし" and not df_master.empty:
+                    match = df_master[df_master["料理名"] == dish]
+                    if not match.empty:
+                        ing = match["材料"].iloc[0]
+                        if ing:
+                            # 区切り文字を統一してリスト化
+                            all_ingredients.extend([x.strip() for x in ing.replace("、", "\n").replace(",", "\n").splitlines() if x.strip()])
         
-        st.table(pd.DataFrame(summary_data))
+        st.dataframe(pd.DataFrame(summary), hide_index=True)
 
     with col_b:
         st.write("🛒 買い物リスト")
-        unique_ingredients = sorted(list(set(all_ingredients)))
-        if unique_ingredients:
-            for item in unique_ingredients:
-                st.checkbox(item, key=f"buy_{item}")
+        unique_ings = sorted(list(set(all_ingredients)))
+        if unique_ings:
+            for item in unique_ings:
+                st.checkbox(item, key=f"list_{item}")
         else:
-            st.write("料理を選択するとリストが表示されます。")
+            st.write("料理を選ぶとリストが出ます")
 
-# --- 5. 料理の追加・修正（PM視点：データの永続化） ---
+# --- 5. 追加・修正機能 ---
 st.write("---")
 with st.expander("メニューの追加・修正"):
-    with st.form("edit_form", clear_on_submit=True):
+    with st.form("edit", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
-            name = st.text_input("料理名（既存名なら修正、新規なら追加）")
+            name = st.text_input("料理名")
         with c2:
             cat = st.selectbox("カテゴリー", categories)
-        ing = st.text_area("材料（「、」や改行で区切ってください）")
+        ing = st.text_area("材料（「、」で区切る）")
         
-        if st.form_submit_button("スプレッドシートを更新"):
+        if st.form_submit_button("保存"):
             if name and spread:
-                # 既存なら削除して追加（＝修正）、新規ならそのまま追加
+                # 修正（既存削除）→ 追加のロジック
                 new_df = df_master[df_master["料理名"] != name]
                 add_row = pd.DataFrame([[name, cat, ing]], columns=["料理名", "カテゴリー", "材料"])
                 final_df = pd.concat([new_df, add_row], ignore_index=True)
                 spread.df_to_sheet(final_df, index=False, replace=True)
-                st.success(f"「{name}」を保存しました。")
+                st.success("更新しました")
                 st.cache_data.clear()

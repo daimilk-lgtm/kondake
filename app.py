@@ -27,18 +27,17 @@ def get_data():
 # --- 2. デザイン・スタイル定義（CSS） ---
 st.set_page_config(page_title="献だけ", layout="centered")
 
+# エラーの原因となっていた中括弧をエスケープしたCSS定義
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
     
-    /* 全体：極細フォント設定 */
     html, body, [class*="css"], p, div, select, input, label {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
         color: #333;
     }
     
-    /* タイトル：指示通りの極細・広間隔デザイン */
     .main-title {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 100 !important;
@@ -49,14 +48,12 @@ st.markdown("""
         color: #222;
     }
 
-    /* スマホ操作性向上：入力欄の角丸 */
     .stSelectbox [data-baseweb="select"], .stTextInput input, .stTextArea textarea {
         border-radius: 16px !important;
         border: 1px solid #eee !important;
         padding: 10px !important;
     }
 
-    /* 印刷用レイアウト：A4一枚完結・不要なアイコン排除 */
     @media print {
         .no-print, header, [data-testid="stSidebar"], .stTabs [data-baseweb="tab-list"], button, .stDivider {
             display: none !important;
@@ -79,12 +76,13 @@ st.markdown("""
         }
         .print-table th { background-color: #fafafa; }
         .list-title { border-bottom: 2px solid #222; margin-top: 40px; font-size: 16pt; font-weight: 400; }
+        /* 印刷時に余計なリンクアイコン（🔗）が出るのを防ぐ */
+        a { text-decoration: none !important; color: black !important; }
     }
     .print-area { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
-# 指示通りのタイトル表示
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
 df, sha = get_data()
@@ -95,7 +93,6 @@ if df is None:
 tab_plan, tab_manage = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 指示：日付入力（日曜スタート）
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
@@ -123,12 +120,10 @@ with tab_plan:
             for cat in cats:
                 opts = df[df["カテゴリー"] == cat]["料理名"].tolist()
                 day_menu[cat] = st.selectbox(cat, ["なし"] + opts, key=f"s_{i}_{cat}")
-            # 指示：フリースペース
             day_menu["memo"] = st.text_area("予定・備考", placeholder="例：遅め", key=f"m_{i}", height=80)
             weekly_plan[d_str] = day_menu
 
-    if st.button("献立を確定（印刷用レイアウト生成）", type="primary", use_container_width=True):
-        # 買い物リスト合算
+    if st.button("献立を確定して印刷用レイアウトを表示", type="primary", use_container_width=True):
         all_ings = []
         rows_html = ""
         for d, v in weekly_plan.items():
@@ -142,8 +137,8 @@ with tab_plan:
         counts = pd.Series(all_ings).value_counts().sort_index()
         buy_list_text = ', '.join([f"{k} ({v})" if v > 1 else k for k, v in counts.items()]) if not counts.empty else "なし"
 
-        # 指示：印刷用レイアウト（余計な絵を排除し、文字を適切に大きく）
-        st.markdown(f"""
+        # 印刷用HTML：エラーを避けるため f-string を慎重に構成
+        print_html = f"""
         <div class="print-area">
             <h1 style="font-weight:100; text-align:center;">{start_date.strftime('%Y/%m/%d')} 週の献立表</h1>
             <p style="text-align:right;">テーマ: {weekly_memo}</p>
@@ -154,4 +149,18 @@ with tab_plan:
                 <tbody>{rows_html}</tbody>
             </table>
             <h2 class="list-title">買い物リスト</h2>
-            <p style="font-size:12pt; line-height:1.8; letter-spacing:0.05
+            <p style="font-size:12pt; line-height:1.8;">{buy_list_text}</p>
+        </div>
+        """
+        st.markdown(print_html, unsafe_allow_html=True)
+
+        st.subheader("🛒 買い物リスト")
+        if not counts.empty:
+            c1, c2 = st.columns(2)
+            for idx, (item, count) in enumerate(counts.items()):
+                with (c1 if idx % 2 == 0 else c2):
+                    st.checkbox(f"{item} × {count}" if count > 1 else item, key=f"b_{idx}")
+        st.success("印刷用レイアウトが整いました。ブラウザの共有/メニューから「印刷」を選択してください。")
+
+with tab_manage:
+    st.subheader("

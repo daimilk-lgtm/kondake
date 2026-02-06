@@ -3,7 +3,7 @@ import pandas as pd
 from gspread_pandas import Spread
 from google.oauth2.service_account import Credentials
 
-# --- 1. 接続・認証（安定性確保） ---
+# --- 1. 接続・認証（安定動作の追求） ---
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
 @st.cache_data(ttl=60)
@@ -21,35 +21,40 @@ def get_data():
 
 spread, df_master = get_data()
 
-# --- 2. 視覚設計（重なりを解消し、丸み・細字を貫徹） ---
+# --- 2. 視覚設計（仕様：中央タイトル・細字・丸み・重なり解消） ---
 st.set_page_config(page_title="献だけ", layout="wide")
 
-# CSS: 重なりを防ぐためのパディング調整とデザイン定義
+# CSS: コンポーネント同士の干渉を防ぎつつ、デザインを統一
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap');
     
-    /* 全体のフォント設定（丸みと細字） */
+    /* 全体を細字・丸みに統一 */
     html, body, [class*="css"], .stMarkdown, p, div, span, label {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
     }
 
-    /* タイトルエリア：重なりを防ぐために相対位置で余白を確保 */
-    .header-container {
-        width: 100%;
-        padding-top: 20px;
-        padding-bottom: 40px;
+    /* タイトル：中央寄せ。他要素との重なりを防ぐため十分な余白（padding）を確保 */
+    .title-box {
         text-align: center;
+        padding: 2rem 0 3rem 0;
+        width: 100%;
     }
-    .main-title {
+    .title-text {
         font-size: 3rem;
         font-weight: 300;
-        color: #333;
+        letter-spacing: 0.15em;
     }
+    
+    /* 太字（Bold）の徹底排除 */
+    b, strong, th { font-weight: 300 !important; }
+    
+    /* エクスパンダーの文字化け・重なり防止 */
+    .streamlit-expanderHeader { font-family: 'Noto Sans JP', sans-serif !important; }
 </style>
-<div class="header-container">
-    <div class="main-title">献 だけ</div>
+<div class="title-box">
+    <div class="title-text">献 だけ</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -71,7 +76,7 @@ for i, tab in enumerate(st_tabs):
                 day_plan[cat] = val
         selected_plan[tabs_list[i]] = day_plan
 
-# --- 4. 1週間のメニュー表 ＆ 買い物リスト ---
+# --- 4. 買い物リスト ＆ メニュー表 ---
 st.write("")
 if st.button("1週間のメニュー表と買い物リストを作成"):
     st.divider()
@@ -79,7 +84,7 @@ if st.button("1週間のメニュー表と買い物リストを作成"):
     
     all_ings = []
     with res_col1:
-        st.write("📖 １週間のメニュー表")
+        st.write("🗓 1週間のメニュー表")
         table_data = []
         for day, dishes in selected_plan.items():
             row = {"曜日": day}
@@ -91,7 +96,7 @@ if st.button("1週間のメニュー表と買い物リストを作成"):
                     if not match.empty:
                         ing_text = match["材料"].iloc[0]
                         if ing_text:
-                            # 買い物リスト用の材料抽出
+                            # 区切りを正規化して買い物リストへ
                             all_ings.extend([x.strip() for x in ing_text.replace("、", "\n").replace(",", "\n").splitlines() if x.strip()])
         
         st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
@@ -103,7 +108,7 @@ if st.button("1週間のメニュー表と買い物リストを作成"):
             for item in unique_ings:
                 st.checkbox(item, key=f"buy_{item}")
         else:
-            st.write("メニューを選んでください。")
+            st.write("メニューを選ぶと材料が表示されます。")
 
 # --- 5. 料理の追加・修正 ---
 st.write("---")
@@ -114,7 +119,7 @@ with st.expander("📝 料理の追加・内容の修正"):
             name = st.text_input("料理名")
         with f_c2:
             cat = st.selectbox("カテゴリー", categories)
-        ing = st.text_area("材料（「、」で区切る）")
+        ing = st.text_area("材料（「、」や改行で区切る）")
         
         if st.form_submit_button("保存して反映"):
             if name and spread:

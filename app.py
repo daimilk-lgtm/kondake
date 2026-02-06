@@ -32,13 +32,12 @@ def get_dict_data():
         return pd.read_csv(url)
     except: return None
 
-# --- 2. デザイン定義（CSS） ---
+# --- 2. デザイン定義 ---
 st.set_page_config(page_title="献だけ", layout="centered")
 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
-    
     html, body, [class*="css"], p, div, select, input, label, span, .stCheckbox {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
@@ -55,7 +54,6 @@ st.markdown("""
     .stSelectbox [data-baseweb="select"], .stTextInput input, .stTextArea textarea {
         border-radius: 16px !important;
         border: 1px solid #eee !important;
-        background-color: #fafafa !important;
     }
     .shopping-card {
         background-color: #ffffff;
@@ -67,7 +65,6 @@ st.markdown("""
     }
     .category-label { font-size: 0.8rem; font-weight: 400; color: #999; margin-bottom: 5px; }
     .item-row { font-size: 1.1rem; font-weight: 300; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
-    
     .memo-space {
         margin-top: 20px;
         padding: 20px;
@@ -76,31 +73,10 @@ st.markdown("""
         min-height: 120px;
     }
     .memo-title { font-size: 0.9rem; color: #999; margin-bottom: 10px; }
-
-    /* 印刷用表示エリア（通常時は隠す） */
-    .print-only { display: none; }
-
-    /* 印刷プレビューの決定打：全要素を一度消し、印刷専用エリアだけを強制表示 */
-    @media print {
-        body * { visibility: hidden; }
-        .print-only, .print-only * { visibility: visible; }
-        .print-only {
-            display: block !important;
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-        }
-        .shopping-card { 
-            box-shadow: none !important; 
-            border: 1px solid #eee !important; 
-            break-inside: avoid;
-        }
-    }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title no-print">献だけ</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
 df_menu, sha = get_menu_data()
 df_dict = get_dict_data()
@@ -156,39 +132,35 @@ with tab_plan:
             
             df_res = pd.DataFrame(result_data).sort_values("cat")
 
-            # --- 画面表示用と印刷専用エリアの同時生成 ---
+            # HTML生成
             cards_html = ""
             for cat, group in df_res.groupby("cat"):
-                items_html = "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()])
-                cards_html += f"""
-                <div class="shopping-card">
-                    <div class="category-label">{cat}</div>
-                    {items_html}
-                </div>
-                """
+                items_html = "".join([f'<div style="font-size:1.1rem; padding:4px 0; border-bottom:0.5px solid #f9f9f9;">□ {row["name"]}</div>' for _, row in group.iterrows()])
+                cards_html += f'<div style="border:1px solid #eee; padding:15px; border-radius:12px; margin-bottom:10px;"><div style="font-size:0.8rem; color:#999;">{cat}</div>{items_html}</div>'
             
-            memo_html = """
-                <div class="memo-space">
-                    <div class="memo-title">MEMO (その他、買い忘れなど)</div>
-                </div>
-            """
+            memo_html = '<div style="margin-top:20px; padding:20px; border:1px dashed #ccc; border-radius:10px; min-height:120px;"><div style="font-size:0.9rem; color:#999;">MEMO</div></div>'
 
-            # 画面への表示
-            st.markdown(cards_html + memo_html, unsafe_allow_html=True)
+            # 画面表示
+            full_html = f'<div id="printable-area"><h2 style="text-align:center; font-weight:100; letter-spacing:0.5rem;">献だけ</h2><p style="text-align:right;">{start_date.strftime("%Y/%m/%d")} 週</p>{cards_html}{memo_html}</div>'
+            st.markdown(full_html, unsafe_allow_html=True)
             
-            # 印刷専用エリア（CSSで印刷時のみ表示される）
-            st.markdown(f"""
-                <div class="print-only">
-                    <h1 style="font-family: 'Noto Sans JP'; font-weight: 100; text-align: center; font-size: 2.2rem; letter-spacing: 0.5rem;">献だけ</h1>
-                    <div style="font-size: 0.9rem; text-align: right; margin-bottom: 10px;">{start_date.strftime('%Y/%m/%d')} 週</div>
-                    {cards_html}
-                    {memo_html}
-                </div>
-            """, unsafe_allow_html=True)
-            
-            st.success("リスト完成。ブラウザの『印刷』からA4出力できます。")
-        else:
-            st.info("メニューを選択してください。")
+            # 印刷ボタン（JavaScriptで抽出）
+            st.components.v1.html(f"""
+                <script>
+                function printList() {{
+                    var content = window.parent.document.getElementById("printable-area").innerHTML;
+                    var win = window.open('', '', 'height=700,width=900');
+                    win.document.write('<html><head><title>印刷</title>');
+                    win.document.write('<style>body{{font-family:"Noto Sans JP",sans-serif; padding:20px;}}</style>');
+                    win.document.write('</head><body>');
+                    win.document.write(content);
+                    win.document.write('</body></html>');
+                    win.document.close();
+                    win.print();
+                }}
+                </script>
+                <button onclick="printList()" style="width:100%; padding:10px; background:#333; color:white; border:none; border-radius:10px; cursor:pointer; font-family:sans-serif;">このリストをA4印刷する</button>
+            """, height=60)
 
 with tab_manage:
     st.subheader("⚙️ メニュー管理")

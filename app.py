@@ -29,20 +29,32 @@ st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
     
-    /* 全体フォント設定：細身(300)で清潔感を出す */
+    /* 全体フォント設定：細身(300) */
     html, body, [class*="css"], p, div, select, input, label {{
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
         letter-spacing: 0.05rem;
     }}
     
-    /* 入力欄の角丸と余白 */
+    /* タイトルデザイン：細身・絶妙な間隔 */
+    .main-title {{
+        font-family: 'Noto Sans JP', sans-serif !important;
+        font-weight: 100 !important; /* さらに細く */
+        font-size: 2.8rem;
+        letter-spacing: 0.4rem; /* 文字間隔を広げてロゴっぽく */
+        color: #333;
+        text-align: center;
+        margin-top: -20px;
+        margin-bottom: 30px;
+    }}
+
+    /* 入力欄の角丸 */
     .stSelectbox [data-baseweb="select"], .stTextInput input, .stTextArea textarea {{
         border-radius: 12px !important;
         border: 1px solid #eee !important;
     }}
     
-    /* 曜日タブのスタイル */
+    /* 曜日タブ */
     .stTabs [data-baseweb="tab-list"] {{
         gap: 4px;
         background-color: transparent;
@@ -53,7 +65,7 @@ st.markdown(f"""
         background-color: #fcfcfc;
     }}
     
-    /* 印刷用設定（Ctrl+PでA4一枚に収める） */
+    /* 印刷用設定 */
     @media print {{
         .no-print, header, [data-testid="stSidebar"], .stTabs [data-baseweb="tab-list"], button {{
             display: none !important;
@@ -81,7 +93,8 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("献だけ")
+# カスタムタイトルを表示
+st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
 df, sha = get_data()
 if df is None:
@@ -92,7 +105,6 @@ if df is None:
 tab_plan, tab_manage = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 日付入力：初期値は直近の日曜日
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
@@ -101,11 +113,10 @@ with tab_plan:
     with col_date:
         start_date = st.date_input("開始日（日）", value=default_sun)
     with col_memo:
-        weekly_memo = st.text_input("今週の全体メモ（テーマなど）", placeholder="例：ヘルシー週間、冷蔵庫一掃")
+        weekly_memo = st.text_input("今週の全体メモ", placeholder="例：ヘルシー週間")
 
     st.divider()
 
-    # 曜日タブ：日〜土
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
     
@@ -121,15 +132,12 @@ with tab_plan:
             for cat in cats:
                 opts = df[df["カテゴリー"] == cat]["料理名"].tolist()
                 day_menu[cat] = st.selectbox(f"{cat}", ["なし"] + opts, key=f"sel_{i}_{cat}")
-            # 仕様：フリースペース（デイリーメモ）
-            day_menu["memo"] = st.text_area("今日のメモ・予定", placeholder="例：塾で遅め、旦那飲み会", key=f"memo_{i}", height=70)
+            day_menu["memo"] = st.text_area("今日のメモ・予定", placeholder="例：遅め", key=f"memo_{i}", height=70)
             weekly_plan[d_str] = day_menu
 
     st.divider()
 
-    # 買い物リスト生成と印刷用表示
-    if st.button("献立を確定（買い物リスト・印刷用表示）", type="primary", use_container_width=True):
-        # 買い物リスト集計
+    if st.button("献立を確定して買い物リストを表示", type="primary", use_container_width=True):
         all_ings = []
         for d_menu in weekly_plan.values():
             for k, dish in d_menu.items():
@@ -138,30 +146,21 @@ with tab_plan:
                     items = str(m_data).replace("、", ",").split(",")
                     all_ings.extend([x.strip() for x in items if x.strip()])
 
-        # --- 印刷用表示エリア ---
         st.markdown('<div class="print-only">', unsafe_allow_html=True)
         st.write(f"## 献立表：{start_date.strftime('%Y/%m/%d')} 〜")
         st.write(f"**今週のメモ:** {weekly_memo}")
-        
-        # 印刷用テーブル
         print_df = pd.DataFrame(weekly_plan).T
         st.table(print_df)
-        
-        if all_ings:
-            st.write("### 🛒 買い物リスト")
-            counts = pd.Series(all_ings).value_counts().sort_index()
-            st.write(", ".join([f"{k}({v})" if v > 1 else k for k, v in counts.items()]))
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 画面用表示
-        st.subheader("🛒 買い物リスト（画面用）")
+        st.subheader("🛒 買い物リスト")
         if all_ings:
             counts = pd.Series(all_ings).value_counts().sort_index()
             c1, c2 = st.columns(2)
             for idx, (item, count) in enumerate(counts.items()):
                 with (c1 if idx % 2 == 0 else c2):
                     st.checkbox(f"{item} × {count}" if count > 1 else item, key=f"b_{idx}")
-        st.info("ブラウザの印刷機能（Ctrl+P / 共有>印刷）を使うとA4に最適化された献立表が印刷できます。")
+        st.info("ブラウザの印刷機能でA4出力が可能です。")
 
 with tab_manage:
     st.subheader("メニュー管理")

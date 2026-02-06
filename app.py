@@ -144,7 +144,6 @@ with tab_plan:
             st.markdown("### 🛒 買い物リスト")
             st.markdown(cards_html + memo_html, unsafe_allow_html=True)
             
-            # 修正箇所：複雑なf-stringを避け、印刷用テーブルHTMLを別途作成
             print_table = f'<table style="width:100%; border-collapse:collapse; border:1px solid #eee;">{rows_html}</table>'
             printable_content = f"""
             <div id="printable-area">
@@ -159,9 +158,40 @@ with tab_plan:
             """
             st.markdown(f'<div style="display:none;">{printable_content}</div>', unsafe_allow_html=True)
             
+            # JavaScript内の波括弧を二重（{{ }}）にしてPythonのエラーを回避
             st.components.v1.html(f"""
                 <script>
                 function printList() {{
                     var content = window.parent.document.getElementById("printable-area").innerHTML;
                     var win = window.open('', '', 'height=700,width=900');
-                    win.document.write('<html><head><title>
+                    win.document.write('<html><head><title>印刷</title>');
+                    win.document.write('<style>body{{font-family:"Noto Sans JP",sans-serif; padding:20px;}} table{{width:100%; border-collapse:collapse; margin-bottom:20px;}} th,td{{border:1px solid #eee; padding:8px; text-align:left;}} .shopping-card{{border:1px solid #eee; padding:15px; border-radius:12px; margin-bottom:10px;}} .category-label{{font-size:0.8rem; color:#999;}} .item-row{{font-size:1.1rem; padding:4px 0; border-bottom:0.5px solid #f9f9f9;}} .memo-space{{margin-top:20px; padding:20px; border:1px dashed #ccc; border-radius:10px; min-height:100px;}}</style>');
+                    win.document.write('</head><body>');
+                    win.document.write(content);
+                    win.document.write('</body></html>');
+                    win.document.close();
+                    win.print();
+                }}
+                </script>
+                <button onclick="printList()" style="width:100%; padding:15px; background:#333; color:white; border:none; border-radius:10px; cursor:pointer; font-weight:bold; margin-top:10px;">この内容をA4印刷する</button>
+            """, height=80)
+        else:
+            st.info("メニューを選択してください。")
+
+with tab_manage:
+    st.subheader("⚙️ メニュー管理")
+    with st.form("add", clear_on_submit=True):
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", cats)
+        m = st.text_area("材料（「、」区切り）")
+        if st.form_submit_button("保存"):
+            if n and m:
+                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
+                csv_b64 = base64.b64encode(new_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8")).decode("utf-8")
+                res = requests.put(f"https://api.github.com/repos/{REPO}/contents/{FILE}", 
+                    headers={"Authorization": f"token {TOKEN}"},
+                    json={"message": f"Add {n}", "content": csv_b64, "sha": sha})
+                if res.status_code == 200:
+                    st.cache_data.clear()
+                    st.rerun()
+    st.dataframe(df_menu, use_container_width=True)

@@ -1,45 +1,28 @@
 import streamlit as st
 import pandas as pd
-from gspread_pandas import Spread
-from google.oauth2.service_account import Credentials
-import json
+import sqlite3
 
-# --- 1. 接続・認証 ---
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-@st.cache_data(ttl=60)
-def get_data():
+# --- 1. データの読み込み (CSVから読み込んでSQLite化) ---
+@st.cache_data
+def load_data():
     try:
-        # Secretsから json_data を読み込む
-        if "json_data" not in st.secrets:
-            return None, pd.DataFrame()
-
-        info = json.loads(st.secrets["json_data"])
-        
-        # 秘密鍵の改行処理
-        if "private_key" in info:
-            info["private_key"] = info["private_key"].replace("\\n", "\n")
-            
-        creds = Credentials.from_service_account_info(info, scopes=scope)
-        # スプレッドシート名「献だけデータ」
-        spread = Spread("献だけデータ", creds=creds)
-        # シート1を読み込み
-        df = spread.sheet_to_df(sheet="シート1", index=None)
-        
+        # さきほど作成した menu.csv を読み込む
+        df = pd.read_csv("menu.csv")
         # カテゴリーの余計な空白を削除
-        if not df.empty and "カテゴリー" in df.columns:
-            df["カテゴリー"] = df["カテゴリー"].str.strip()
-            
-        return spread, df
+        df["カテゴリー"] = df["カテゴリー"].str.strip()
+        
+        # メモリ上に一時的なSQLiteデータベースを作成
+        conn = sqlite3.connect(':memory:', check_same_thread=False)
+        df.to_sql('menu_table', conn, index=False, if_exists='replace')
+        return conn, df
     except Exception as e:
-        st.error(f"読み込みエラー: {e}")
+        st.error(f"ファイル読み込みエラー: {e}")
         return None, pd.DataFrame()
 
-spread, df_master = get_data()
+conn, df_master = load_data()
 
 # --- 2. 画面デザイン ---
 st.set_page_config(page_title="献だけ", layout="wide")
-
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap');
@@ -54,58 +37,55 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 3. 献立作成エリア ---
-tabs_list = ["月", "火", "水", "木", "金", "土", "日"]
-st_tabs = st.tabs(tabs_list)
-categories = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
+if not df_master.empty:
+    tabs_list = ["月", "火", "水", "木", "金", "土", "日"]
+    st_tabs = st.tabs(tabs_list)
+    categories = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
 
-selected_plan = {}
+    selected_plan = {}
 
-for i, tab in enumerate(st_tabs):
-    with tab:
-        cols = st.columns(5)
-        day_plan = {}
-        for j, cat in enumerate(categories):
-            with cols[j]:
-                options = []
-                if not df_master.empty:
-                    options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist()
-                
-                val = st.selectbox(cat, ["選択なし"] + options, key=f"sel_{tabs_list[i]}_{cat}")
-                day_plan[cat] = val
-        selected_plan[tabs_list[i]] = day_plan
+    for i, tab in enumerate(st_tabs):
+        with tab:
+            cols = st.columns(5)
+            day_plan = {}
+            for j, cat in enumerate(categories):
+                with cols[j]:
+                    # SQLiteからそのカテゴリーの料理を抽出
+                    query = f"SELECT 料理名 FROM menu_table WHERE カテゴリー = '{cat}'"
+                    options = pd.read_sql(query, conn)["料理名"].tolist()
+                    
+                    val = st.selectbox(cat, ["選択なし"] + options, key=f"sel_{tabs_list[i]}_{cat}")
+                    day_plan[cat] = val
+            selected_plan[tabs_list[i]] = day_plan
 
-# --- 4. 買い物リスト生成 ---
-st.write("")
-if st.button("こんだけ作成", type="primary", use_container_width=True):
-    st.divider()
-    res_col1, res_col2 = st.columns([3, 2])
-    
-    all_ingredients = []
-    
-    with res_col1:
-        st.subheader("📖 今週の献立")
-        display_list = []
-        for day, dishes in selected_plan.items():
-            row = {"曜日": day}
-            row.update(dishes)
-            display_list.append(row)
-            
-            for dish_name in dishes.values():
-                if dish_name != "選択なし":
-                    match = df_master[df_master["料理名"] == dish_name]
-                    if not match.empty:
-                        ing_raw = match["材料"].iloc[0]
-                        if ing_raw:
-                            items = str(ing_raw).replace("、", "\n").replace(",", "\n").splitlines()
-                            all_ingredients.extend([x.strip() for x in items if x.strip()])
+    # --- 4. 買い物リスト生成 ---
+    if st.button("こんだけ作成", type="primary", use_container_width=True):
+        st.divider()
+        col1, col2 = st.columns([3, 2])
         
-        st.dataframe(pd.DataFrame(display_list), hide_index=True)
+        all_ingredients = []
+        with col1:
+            st.subheader("📖 今週の献立")
+            # 献立表の表示
+            st.table(pd.DataFrame(selected_plan).T)
+            
+            for dishes in selected_plan.values():
+                for dish_name in dishes.values():
+                    if dish_name != "選択なし":
+                        match = df_master[df_master["料理名"] == dish_name]
+                        if not match.empty:
+                            ing = match["材料"].iloc[0]
+                            if pd.notna(ing):
+                                items = str(ing).replace("、", "\n").replace(",", "\n").splitlines()
+                                all_ingredients.extend([x.strip() for x in items if x.strip()])
 
-    with res_col2:
-        st.subheader("🛒 買い物リスト")
-        unique_ings = sorted(list(set(all_ingredients)))
-        if unique_ings:
-            for item in unique_ings:
-                st.checkbox(item, key=f"check_{item}")
-        else:
-            st.info("メニューを選択してください")
+        with col2:
+            st.subheader("🛒 買い物リスト")
+            unique_ings = sorted(list(set(all_ingredients)))
+            if unique_ings:
+                for item in unique_ings:
+                    st.checkbox(item, key=f"check_{item}")
+            else:
+                st.info("メニューを選択してください")
+else:
+    st.warning("menu.csv の読み込みに失敗しました。ファイル名と中身を確認してください。")

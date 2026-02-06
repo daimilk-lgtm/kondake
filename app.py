@@ -19,32 +19,30 @@ def get_csv_from_github():
         res = requests.get(url, headers=headers)
         if res.status_code == 200:
             content = base64.b64decode(res.json()["content"]).decode("utf-8-sig")
-            # 読み込み時に列名を強制指定して文字化けによるエラーを防ぐ
             df = pd.read_csv(io.StringIO(content))
-            # 列名のスペース除去とクリーンアップ
             df.columns = [c.strip() for c in df.columns]
             for col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
             return df, res.json()["sha"]
     except Exception as e:
-        st.error(f"読み込み失敗: {e}")
+        pass
     return pd.DataFrame(), None
 
 def update_github_csv(df, sha):
     url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
     headers = {"Authorization": f"token {TOKEN}"}
     content_base64 = base64.b64encode(df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8")).decode("utf-8")
-    data = {"message": "Update menu", "content": content_base64, "sha": sha}
+    data = {"message": "Update menu via app", "content": content_base64, "sha": sha}
     res = requests.put(url, headers=headers, json=data)
     return res.status_code == 200
 
-# データ取得
+# データの初期化
 df_master, current_sha = get_csv_from_github()
 conn = sqlite3.connect(':memory:', check_same_thread=False)
 if not df_master.empty:
     df_master.to_sql('menu_table', conn, index=False, if_exists='replace')
 
-# --- 2. デザイン ---
+# --- 2. デザイン (細字・Noto Sans) ---
 st.set_page_config(page_title="献だけ", layout="wide")
 st.markdown("""
 <style>
@@ -69,7 +67,10 @@ tab_plan, tab_manage = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"
 
 with tab_plan:
     if not df_master.empty:
-        start_date = st.date_input("開始日（日曜日）", value=today - timedelta(days=(today.weekday() + 1) % 7))
+        # 日曜スタートの設定
+        default_sun = today - timedelta(days=(today.weekday() + 1) % 7)
+        start_date = st.date_input("開始日（日曜日）", value=default_sun)
+        
         day_names = ["日", "月", "火", "水", "木", "金", "土"]
         day_tabs = st.tabs([f"{day_names[i]} ({(start_date + timedelta(days=i)).strftime('%m/%d')})" for i in range(7)])
         cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
@@ -82,20 +83,20 @@ with tab_plan:
                 d_label = f"{day_names[i]}({(start_date + timedelta(days=i)).strftime('%m/%d')})"
                 for j, cat in enumerate(cats):
                     with cols[j]:
-                        # SQLクエリで正確に抽出
                         opts = pd.read_sql(f"SELECT 料理名 FROM menu_table WHERE カテゴリー='{cat}'", conn)["料理名"].tolist()
                         val = st.selectbox(cat, ["選択なし"] + opts, key=f"s_{i}_{j}")
                         day_plan[cat] = val
                 selected_plan[d_label] = day_plan
 
         st.divider()
-        user_memo = st.text_area("📝 フリーメモ", key="f_memo")
+        user_memo = st.text_area("📝 フリーメモ", placeholder="追加の買い物など")
         
         if st.button("こんだけ作成", type="primary", use_container_width=True):
             st.markdown('<div class="thin-title">今週の献立</div>', unsafe_allow_html=True)
             st.table(pd.DataFrame(selected_plan).T)
+            
             st.markdown('<div class="thin-title">買い物リスト</div>', unsafe_allow_html=True)
-            if user_memo: st.info(user_memo)
+            if user_memo: st.info(f"【メモ】\n{user_memo}")
             
             raw_ings = []
             for d in selected_plan.values():
@@ -105,12 +106,13 @@ with tab_plan:
                         if not m.empty:
                             items = str(m["材料"].iloc[0]).replace("、", "\n").replace(",", "\n").splitlines()
                             raw_ings.extend([x.strip() for x in items if x.strip()])
+            
             if raw_ings:
                 counts = pd.Series(raw_ings).value_counts().sort_index()
                 for n, c in counts.items():
                     st.checkbox(f"{n} × {c}" if c > 1 else n, key=f"c_{n}")
     else:
-        st.error("データの読み込みに失敗しました。GitHubのCSVを確認してください。")
+        st.error("GitHubのCSVを読み込めません。Secretsのファイル名を確認してください。")
 
 with tab_manage:
     st.markdown('<div class="thin-title">メニューの追加</div>', unsafe_allow_html=True)
@@ -120,9 +122,10 @@ with tab_manage:
         n_ing = st.text_area("材料（「、」で区切る）")
         if st.form_submit_button("保存する"):
             if n_dish and n_ing and current_sha:
-                new_df = pd.concat([df_master, pd.DataFrame([[n_dish, n_cat, n_ing]], columns=df_master.columns)], ignore_index=True)
-                if update_github_csv(new_df, current_sha):
-                    st.success("保存完了！")
+                new_row = pd.DataFrame([[n_dish, n_cat, n_ing]], columns=df_master.columns)
+                df_updated = pd.concat([df_master, new_row], ignore_index=True)
+                if update_github_csv(df_updated, current_sha):
+                    st.success("GitHubへ保存しました！")
                     st.cache_data.clear()
                     st.rerun()
                 else: st.error("保存失敗")

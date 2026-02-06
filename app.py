@@ -4,28 +4,37 @@ import requests
 import base64
 import io
 
-# Secretsから情報を取得
+# Secretsからはトークンだけを読み込む
+if "GITHUB_TOKEN" not in st.secrets:
+    st.error("Secretsに GITHUB_TOKEN が設定されていません。")
+    st.stop()
+
 TOKEN = st.secrets["GITHUB_TOKEN"]
-REPO = st.secrets["GITHUB_REPO"]
-FILE = st.secrets["GITHUB_FILE"]
 
-st.title("献だけ：データ確認")
+# リポジトリの情報はここで直接指定（ミスを防ぐため）
+REPO = "daimilk-lgtm/kondake"
+FILE = "menu.csv"
 
-# GitHubからデータを取得する関数
-def get_data():
-    url = f"https://api.github.com/repos/{REPO}/contents/{FILE}"
-    headers = {"Authorization": f"token {TOKEN}"}
+st.title("献だけ：接続テスト（再）")
+
+# GitHubからデータを取得
+url = f"https://api.github.com/repos/{REPO}/contents/{FILE}"
+headers = {
+    "Authorization": f"token {TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
+
+try:
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
+        st.success("✅ ついに成功！GitHubと繋がりました。")
         content = base64.b64decode(res.json()["content"]).decode("utf-8-sig")
-        return pd.read_csv(io.StringIO(content))
+        df = pd.read_csv(io.StringIO(content))
+        st.write("### 現在のメニューデータ")
+        st.dataframe(df)
     else:
-        st.error(f"読み込み失敗。エラーコード: {res.status_code}")
-        return None
-
-# データの表示
-df = get_data()
-if df is not None:
-    st.success("✅ GitHubのmenu.csvを読み込めました！")
-    st.write("現在登録されているメニュー一覧:")
-    st.dataframe(df)
+        st.error(f"❌ 認証エラー (Code: {res.status_code})")
+        st.write("GitHubメッセージ:", res.json().get("message"))
+        st.info("トークンの権限（Contents: Read and write）を再度確認してください。")
+except Exception as e:
+    st.error(f"エラーが発生しました: {e}")

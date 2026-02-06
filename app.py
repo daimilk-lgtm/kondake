@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.0.1"  # 印刷エラー修正 & 献立プレビュー追加版
+VERSION = "1.0.1"  # 献立プレビュー追加 & 印刷構文エラー修正版
 
 import streamlit as st
 import pandas as pd
@@ -13,8 +13,6 @@ REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
-
-# ... (中略：既存の関数 get_menu_data, get_dict_data) ...
 
 @st.cache_data(ttl=60)
 def get_menu_data():
@@ -204,5 +202,4 @@ with tab_manage:
                     st.cache_data.clear()
                     st.rerun()
     st.dataframe(df_menu, use_container_width=True)
-    # 管理タブの右下にバージョンを表示
     st.markdown(f'<div class="version-label">Version {VERSION}</div>', unsafe_allow_html=True)

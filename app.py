@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.0.1"  # 献立プレビュー追加 & 印刷構文エラー修正版
+VERSION = "1.0.2"  # テスト：合流前プレビューの確認用
 
 import streamlit as st
 import pandas as pd

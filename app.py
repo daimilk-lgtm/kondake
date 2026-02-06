@@ -1,3 +1,6 @@
+# --- 0. バージョン管理情報 ---
+VERSION = "1.0.1"  # 印刷エラー修正 & 献立プレビュー追加版
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -10,6 +13,8 @@ REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
+
+# ... (中略：既存の関数 get_menu_data, get_dict_data) ...
 
 @st.cache_data(ttl=60)
 def get_menu_data():
@@ -50,6 +55,11 @@ st.markdown("""
         letter-spacing: 0.8rem;
         text-align: center;
         margin: 40px 0;
+    }
+    .version-label {
+        font-size: 0.7rem;
+        color: #ccc;
+        text-align: right;
     }
     .stSelectbox [data-baseweb="select"], .stTextInput input, .stTextArea textarea {
         border-radius: 16px !important;
@@ -158,7 +168,6 @@ with tab_plan:
             """
             st.markdown(f'<div style="display:none;">{printable_content}</div>', unsafe_allow_html=True)
             
-            # JavaScript内の波括弧を二重（{{ }}）にしてPythonのエラーを回避
             st.components.v1.html(f"""
                 <script>
                 function printList() {{
@@ -195,3 +204,5 @@ with tab_manage:
                     st.cache_data.clear()
                     st.rerun()
     st.dataframe(df_menu, use_container_width=True)
+    # 管理タブの右下にバージョンを表示
+    st.markdown(f'<div class="version-label">Version {VERSION}</div>', unsafe_allow_html=True)

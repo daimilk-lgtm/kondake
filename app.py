@@ -78,12 +78,10 @@ st.markdown("""
     }
     .memo-title { font-size: 0.9rem; color: #999; margin-bottom: 10px; }
 
-    /* 印刷プレビュー修正：リストエリア(print-content)以外を非表示にする */
     @media print {
         header, [data-testid="stSidebar"], [data-testid="stHeader"], .stTabs, button, .stDivider, footer, .no-print {
             display: none !important;
         }
-        /* 画面上の余計なコンテナ余白を削る */
         [data-testid="stAppViewContainer"] > section:nth-child(2) {
             padding-top: 0rem !important;
         }
@@ -121,7 +119,6 @@ with tab_plan:
     cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
     weekly_plan = {}
 
-    # 入力フォーム全体を no-print クラスで包む（印刷時に隠すため）
     for i, day_tab in enumerate(days_tabs):
         d_str = (start_date + timedelta(days=i)).strftime("%m/%d")
         with day_tab:
@@ -139,4 +136,56 @@ with tab_plan:
                 if dish != "なし":
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     items = str(ing_raw).replace("、", ",").split(",")
-                    all_ings_list.extend([x.strip() for x in items
+                    all_ings_list.extend([x.strip() for x in items if x.strip()])
+        
+        if all_ings_list:
+            counts = pd.Series(all_ings_list).value_counts()
+            result_data = []
+            for item, count in counts.items():
+                category = "99未分類"
+                if df_dict is not None:
+                    for _, row in df_dict.iterrows():
+                        if row["材料"] in item:
+                            category = row["種別"]
+                            break
+                display_name = f"{item} × {count}" if count > 1 else item
+                result_data.append({"name": display_name, "cat": category})
+            
+            df_res = pd.DataFrame(result_data).sort_values("cat")
+
+            for cat, group in df_res.groupby("cat"):
+                items_html = "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()])
+                st.markdown(f"""
+                <div class="shopping-card">
+                    <div class="category-label">{cat}</div>
+                    {items_html}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("""
+                <div class="memo-space">
+                    <div class="memo-title">MEMO (その他、買い忘れなど)</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.success("リスト完成。ブラウザの『印刷』からA4出力できます。")
+        else:
+            st.info("メニューを選択してください。")
+
+with tab_manage:
+    st.subheader("⚙️ メニュー管理")
+    with st.form("add", clear_on_submit=True):
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", cats)
+        m = st.text_area("材料（「、」区切り）")
+        if st.form_submit_button("保存"):
+            if n and m:
+                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
+                csv_b64 = base64.b64encode(new_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8")).decode("utf-8")
+                res = requests.put(f"https://api.github.com/repos/{REPO}/contents/{FILE}", 
+                    headers={"Authorization": f"token {TOKEN}"},
+                    json={"message": f"Add {n}", "content": csv_b64, "sha": sha})
+                if res.status_code == 200:
+                    st.cache_data.clear()
+                    st.rerun()
+    st.dataframe(df_menu, use_container_width=True)

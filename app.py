@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import re
 
 # --- 1. データの読み込み ---
 @st.cache_data
@@ -28,7 +27,7 @@ st.markdown("""
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
     }
-    .title-wrapper { text-align: center; padding: 2rem 0; }
+    .title-wrapper { text-align: center; padding: 1rem 0; }
     .title-text { font-size: 3rem; font-weight: 300; letter-spacing: 0.5em; color: #333; }
 </style>
 <div class="title-wrapper"><div class="title-text">献だけ</div></div>
@@ -53,7 +52,15 @@ if not df_master.empty:
                     day_plan[cat] = val
             selected_plan[tabs_list[i]] = day_plan
 
-    # --- 4. 買い物リスト生成 ---
+    st.divider()
+
+    # --- 4. フリーメモスペース（仕様追加） ---
+    st.subheader("📝 フリーメモ")
+    user_memo = st.text_area("追加で買いたいものやメモを自由に記入してください", 
+                             placeholder="例：牛乳、卵、金曜は外食予定など",
+                             key="free_memo")
+
+    # --- 5. 買い物リスト生成 ---
     if st.button("こんだけ作成", type="primary", use_container_width=True):
         st.divider()
         col1, col2 = st.columns([3, 2])
@@ -75,13 +82,16 @@ if not df_master.empty:
 
         with col2:
             st.subheader("🛒 買い物リスト")
+            # メモの内容をリストの先頭に表示
+            if user_memo:
+                st.info(f"【メモ】\n{user_memo}")
+            
             if raw_ings:
-                # 材料ごとに数を数える
                 ing_counts = pd.Series(raw_ings).value_counts().sort_index()
                 for name, count in ing_counts.items():
                     display_name = f"{name} × {count}" if count > 1 else name
                     st.checkbox(display_name, key=f"check_{name}")
-            else:
-                st.info("メニューを選択してください")
+            elif not user_memo:
+                st.info("メニューを選択するか、メモを記入してください")
 else:
     st.warning("menu.csv の内容が読み込めません。")

@@ -102,29 +102,33 @@ with tab_plan:
         st.divider()
         st.markdown("### 🛒 買い物リスト（売場順）")
         
-        all_ings = []
+        all_ings_list = []
         for d, v in weekly_plan.items():
             for cat, dish in v.items():
                 if dish != "なし":
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     items = str(ing_raw).replace("、", ",").split(",")
-                    all_ings.extend([x.strip() for x in items if x.strip()])
+                    all_ings_list.extend([x.strip() for x in items if x.strip()])
         
-        if all_ings:
-            unique_items = sorted(list(set(all_ings)))
+        if all_ings_list:
+            # 個数をカウント
+            counts = pd.Series(all_ings_list).value_counts()
+            
             result_data = []
-            for item in unique_items:
+            for item, count in counts.items():
                 category = "99未分類"
                 if df_dict is not None:
                     for _, row in df_dict.iterrows():
                         if row["材料"] in item:
                             category = row["種別"]
                             break
-                result_data.append({"name": item, "cat": category})
+                # 表示名を「材料名 × 個数」に整形
+                display_name = f"{item} × {count}" if count > 1 else item
+                result_data.append({"name": display_name, "cat": category})
             
+            # カテゴリー順にソート
             df_res = pd.DataFrame(result_data).sort_values("cat")
 
-            # 修正ポイント：三連引用符を使用してSyntaxErrorを防止
             for cat, group in df_res.groupby("cat"):
                 items_html = "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()])
                 card_html = f"""

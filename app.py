@@ -11,8 +11,12 @@ scope = [
 
 def get_data_from_sheets():
     try:
-        creds_dict = st.secrets["gcp_service_account"]
+        # Secretsを読み込む。見出しがあってもなくても対応できる書き方
+        s = st.secrets
+        creds_dict = s["gcp_service_account"] if "gcp_service_account" in s else dict(s)
+        
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        # スプレッドシート「献だけデータ」を開く
         spread = Spread("献だけデータ", creds=creds)
         df = spread.sheet_to_df(index=None)
         return spread, df
@@ -31,29 +35,32 @@ tabs = ["月", "火", "水", "木", "金", "土", "日"]
 selected_tab = st.tabs(tabs)
 categories = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
 
-for i, tab in enumerate(selected_tab):
-    with tab:
-        cols = st.columns(len(categories))
-        for j, cat in enumerate(categories):
-            with cols[j]:
-                options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist()
-                st.selectbox(cat, ["なし"] + options, key=f"{tabs[i]}_{cat}")
+if not df_master.empty:
+    for i, tab in enumerate(selected_tab):
+        with tab:
+            cols = st.columns(len(categories))
+            for j, cat in enumerate(categories):
+                with cols[j]:
+                    options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist()
+                    st.selectbox(cat, ["なし"] + options, key=f"{tabs[i]}_{cat}")
+else:
+    st.warning("スプレッドシートにデータがないか、読み込めていません。")
 
 # --- 4. 料理の追加機能 ---
 st.divider()
-with st.expander("＋ 新しい料理をスプレッドシートに登録する"):
+with st.expander("＋ 新しい料理を登録する"):
     with st.form("add_dish"):
         new_name = st.text_input("料理名")
         new_cat = st.selectbox("カテゴリー", categories)
         new_ingredients = st.text_area("材料メモ")
-        submit = st.form_submit_button("スプレッドシートに保存")
+        submit = st.form_submit_button("保存")
         
         if submit and new_name:
             if spread is not None:
                 new_row = pd.DataFrame([[new_name, new_cat, new_ingredients]], columns=["料理名", "カテゴリー", "材料"])
                 updated_df = pd.concat([df_master, new_row], ignore_index=True)
                 spread.df_to_sheet(updated_df, index=False, replace=True)
-                st.success(f"「{new_name}」を保存しました！画面を更新してください。")
+                st.success(f"保存しました！ページを更新して反映させてください。")
 
-if st.button("今週の献立を確定"):
+if st.button("献立確定"):
     st.balloons()

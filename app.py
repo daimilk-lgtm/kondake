@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
-DICT_FILE = "ingredients.csv" # 売場辞書
+DICT_FILE = "ingredients.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
 @st.cache_data(ttl=60)
@@ -32,7 +32,7 @@ def get_dict_data():
         return pd.read_csv(url)
     except: return None
 
-# --- 2. デザイン定義（極細・モダンUI） ---
+# --- 2. 究極のデザイン定義（CSS） ---
 st.set_page_config(page_title="献だけ", layout="centered")
 
 st.markdown("""
@@ -81,7 +81,6 @@ if df_menu is None:
 tab_plan, tab_manage = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 日曜スタート
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
@@ -125,6 +124,33 @@ with tab_plan:
             
             df_res = pd.DataFrame(result_data).sort_values("cat")
 
+            # 修正ポイント：三連引用符を使用してSyntaxErrorを防止
             for cat, group in df_res.groupby("cat"):
                 items_html = "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()])
-                st.markdown(f'
+                card_html = f"""
+                <div class="shopping-card">
+                    <div class="category-label">{cat}</div>
+                    {items_html}
+                </div>
+                """
+                st.markdown(card_html, unsafe_allow_html=True)
+        else:
+            st.info("メニューを選択してください。")
+
+with tab_manage:
+    st.subheader("⚙️ メニュー登録")
+    with st.form("add", clear_on_submit=True):
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", cats)
+        m = st.text_area("材料（「、」区切り）")
+        if st.form_submit_button("保存"):
+            if n and m:
+                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
+                csv_b64 = base64.b64encode(new_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8")).decode("utf-8")
+                res = requests.put(f"https://api.github.com/repos/{REPO}/contents/{FILE}", 
+                    headers={"Authorization": f"token {TOKEN}"},
+                    json={"message": f"Add {n}", "content": csv_b64, "sha": sha})
+                if res.status_code == 200:
+                    st.cache_data.clear()
+                    st.rerun()
+    st.dataframe(df_menu, use_container_width=True)

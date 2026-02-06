@@ -2,24 +2,24 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 
-# --- 1. データの読み込み (CSVから読み込んでSQLite化) ---
+# --- 1. データの読み込み (キャッシュはデータのみにする) ---
 @st.cache_data
-def load_data():
+def get_clean_df():
     try:
-        # さきほど作成した menu.csv を読み込む
+        # menu.csv を読み込む
         df = pd.read_csv("menu.csv")
-        # カテゴリーの余計な空白を削除
         df["カテゴリー"] = df["カテゴリー"].str.strip()
-        
-        # メモリ上に一時的なSQLiteデータベースを作成
-        conn = sqlite3.connect(':memory:', check_same_thread=False)
-        df.to_sql('menu_table', conn, index=False, if_exists='replace')
-        return conn, df
+        return df
     except Exception as e:
         st.error(f"ファイル読み込みエラー: {e}")
-        return None, pd.DataFrame()
+        return pd.DataFrame()
 
-conn, df_master = load_data()
+df_master = get_clean_df()
+
+# SQLiteの接続を確立（キャッシュの外で行う）
+conn = sqlite3.connect(':memory:', check_same_thread=False)
+if not df_master.empty:
+    df_master.to_sql('menu_table', conn, index=False, if_exists='replace')
 
 # --- 2. 画面デザイン ---
 st.set_page_config(page_title="献だけ", layout="wide")
@@ -50,7 +50,7 @@ if not df_master.empty:
             day_plan = {}
             for j, cat in enumerate(categories):
                 with cols[j]:
-                    # SQLiteからそのカテゴリーの料理を抽出
+                    # カテゴリーに合う料理を抽出
                     query = f"SELECT 料理名 FROM menu_table WHERE カテゴリー = '{cat}'"
                     options = pd.read_sql(query, conn)["料理名"].tolist()
                     
@@ -66,7 +66,6 @@ if not df_master.empty:
         all_ingredients = []
         with col1:
             st.subheader("📖 今週の献立")
-            # 献立表の表示
             st.table(pd.DataFrame(selected_plan).T)
             
             for dishes in selected_plan.values():
@@ -88,4 +87,4 @@ if not df_master.empty:
             else:
                 st.info("メニューを選択してください")
 else:
-    st.warning("menu.csv の読み込みに失敗しました。ファイル名と中身を確認してください。")
+    st.warning("menu.csv の内容が読み込めません。")

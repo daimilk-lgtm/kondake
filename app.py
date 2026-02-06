@@ -14,21 +14,21 @@ def get_week_dates(start_date):
         dates.append(target_date.strftime(f"%m/%d({wdays[w_idx]})"))
     return dates
 
-# --- 究極のデザイン定義（CSS） ---
+# --- 1. デザイン定義（細身のフォント・角丸・カードUI） ---
 st.set_page_config(page_title="献だけ", layout="centered")
 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
     
-    /* 全ての文字を細身(300)に統一 */
+    /* フォントウェイト300を基本に設定 */
     html, body, [class*="css"], p, div, select, input, label, span, .stCheckbox {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
         color: #333;
     }
     
-    /* 極細タイトルロゴ */
+    /* 極細タイトルロゴ(100) */
     .main-title {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 100 !important;
@@ -38,14 +38,14 @@ st.markdown("""
         margin: 40px 0;
     }
 
-    /* 角丸モダンUI */
+    /* 角丸モダンな入力欄 */
     .stTextInput input, .stTextArea textarea {
-        border-radius: 16px !important;
+        border-radius: 12px !important;
         border: 1px solid #eee !important;
         background-color: #fafafa !important;
     }
 
-    /* 買い物リストのカードデザイン */
+    /* 買い物リストの整理されたカード形式 */
     .shopping-card {
         background-color: #ffffff;
         padding: 20px;
@@ -61,7 +61,6 @@ st.markdown("""
         color: #999;
         letter-spacing: 0.1rem;
         margin-bottom: 8px;
-        text-transform: uppercase;
     }
 
     .item-row {
@@ -75,56 +74,63 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
-# 1. 日付設定（日曜スタート仕様）
+# --- 2. 日付・献立カテゴリー設定 ---
 today = datetime.now()
 offset = (today.weekday() + 1) % 7
 default_sun = today - timedelta(days=offset)
 
-col_d, col_m = st.columns([1, 2])
+col_d, _ = st.columns([1, 2])
 with col_d:
     start_date = st.date_input("開始日（日）", value=default_sun)
-with col_m:
-    st.write("") # スペース調整
 
 week_labels = get_week_dates(start_date)
+menu_cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
 
-# 2. 献立・材料入力エリア
 st.divider()
-st.markdown("### 🗓 献立と材料を入力")
+st.markdown("### 🗓 1週間の献立作成")
+
+# 7日間のタブ入力
 days_tabs = st.tabs([f"{label}" for label in week_labels])
 all_items = []
 
 for i, day_tab in enumerate(days_tabs):
     with day_tab:
-        st.text_input("献立", key=f"menu_{i}", placeholder="例：肉じゃが")
-        items_raw = st.text_area("材料（改行区切り）", key=f"items_{i}", height=120, placeholder="人参\nじゃがいも")
+        # 5つのカテゴリー別献立入力
+        for cat in menu_cats:
+            st.text_input(f"{cat}", key=f"menu_{i}_{cat}", placeholder=f"{cat}を入力")
+        
+        st.markdown("---")
+        # 材料入力（ここで入力したものが買い物リストに並ぶ）
+        items_raw = st.text_area("材料（改行区切り）", key=f"items_{i}", height=120, placeholder="人参\n豚バラ")
+        
         if items_raw:
             all_items.extend([j.strip() for j in items_raw.splitlines() if j.strip()])
 
-# 3. 買い物リスト生成
+# --- 3. 買い物リスト生成（売場順ソート） ---
 if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
     st.divider()
     st.markdown("### 🛒 買い物リスト（売場順）")
     
     if all_items:
         try:
-            # GitHubの辞書を読み込み
+            # GitHubから辞書を取得
             df_dict = pd.read_csv(CSV_URL)
             unique_items = sorted(list(set(all_items)))
             
             result_data = []
             for item in unique_items:
                 category = "99未分類"
-                # あいまい検索
+                # 部分一致ロジックで売場を特定
                 for _, row in df_dict.iterrows():
                     if row["材料"] in item:
                         category = row["種別"]
                         break
                 result_data.append({"name": item, "cat": category})
             
+            # カテゴリー（売場）順に並べ替え
             df_res = pd.DataFrame(result_data).sort_values("cat")
 
-            # 売場ごとに洗練されたカード形式で表示
+            # 売場ごとにカード表示
             for cat, group in df_res.groupby("cat"):
                 items_html = "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()])
                 st.markdown(f"""
@@ -134,9 +140,9 @@ if st.button("確定して買い物リストを生成", type="primary", use_cont
                     </div>
                 """, unsafe_allow_html=True)
                 
-            st.success("リストが生成されました。ブラウザの印刷機能も使えます。")
+            st.success("最短ルートの買い物リストが完成しました。")
             
         except Exception as e:
-            st.error(f"データの読み込みに失敗しました。GitHubの設定を確認してください: {e}")
+            st.error(f"データの読み込みに失敗しました。ingredients.csvがGitHubに存在するか確認してください。")
     else:
         st.info("材料が入力されていません。")

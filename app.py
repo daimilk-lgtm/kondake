@@ -19,8 +19,7 @@ conn = sqlite3.connect(':memory:', check_same_thread=False)
 if not df_master.empty:
     df_master.to_sql('menu_table', conn, index=False, if_exists='replace')
 
-# --- 2. 画面デザイン・仕様メモの反映 ---
-# 仕様: タイトルはすべて細字、フォントはNoto Sans JP
+# --- 2. 画面デザイン・仕様の反映 ---
 st.set_page_config(page_title="献だけ", layout="wide")
 st.markdown("""
 <style>
@@ -31,27 +30,32 @@ st.markdown("""
     }
     .title-wrapper { text-align: center; padding: 1rem 0; }
     .title-text { font-size: 3rem; font-weight: 100; letter-spacing: 0.5em; color: #333; }
-    .thin-title { font-weight: 300 !important; font-size: 1.5rem; margin-top: 2rem; }
+    .thin-title { font-weight: 300 !important; font-size: 1.5rem; margin-top: 2rem; margin-bottom: 1rem; }
     .date-text { text-align: right; font-size: 0.8rem; color: #666; }
 </style>
 <div class="title-wrapper"><div class="title-text">献だけ</div></div>
 """, unsafe_allow_html=True)
 
-# 日付の計算
+# 作成日（自動）
 today = datetime.now()
 st.markdown(f'<div class="date-text">作成日: {today.strftime("%Y/%m/%d")}</div>', unsafe_allow_html=True)
 
-# --- 3. 献立作成エリア ---
+# --- 3. 日付入力と献立作成 ---
 if not df_master.empty:
-    # 今週の月曜日の日付を計算
-    start_of_week = today - timedelta(days=today.weekday())
+    # ユーザーに開始日（日曜日）を選択させる
+    st.subheader("📅 期間設定")
+    start_date = st.date_input("開始日（日曜日）を選択してください", 
+                               value=(today - timedelta(days=(today.weekday() + 1) % 7)),
+                               help="ここに入力した日付から1週間分の日付が自動計算されます")
+
+    # 日曜スタートのラベル作成
+    day_names = ["日", "月", "火", "水", "木", "金", "土"]
     tabs_labels = []
     days_with_date = []
     for i in range(7):
-        d = start_of_week + timedelta(days=i)
-        day_str = ["月", "火", "水", "木", "金", "土", "日"][i]
-        tabs_labels.append(f"{day_str} ({d.strftime('%m/%d')})")
-        days_with_date.append(f"{day_str}({d.strftime('%m/%d')})")
+        d = start_date + timedelta(days=i)
+        tabs_labels.append(f"{day_names[i]} ({d.strftime('%m/%d')})")
+        days_with_date.append(f"{day_names[i]}({d.strftime('%m/%d')})")
 
     st_tabs = st.tabs(tabs_labels)
     categories = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
@@ -76,12 +80,11 @@ if not df_master.empty:
     if st.button("こんだけ作成", type="primary", use_container_width=True):
         st.divider()
         
-        # 1. 今週の献立 (縦並び)
+        # 1. 今週の献立 (縦並び / 細字タイトル)
         st.markdown('<div class="thin-title">今週の献立</div>', unsafe_allow_html=True)
-        df_plan = pd.DataFrame(selected_plan).T
-        st.table(df_plan)
+        st.table(pd.DataFrame(selected_plan).T)
         
-        # 2. 買い物リスト (縦並び)
+        # 2. 買い物リスト (縦並び / 細字タイトル)
         st.markdown('<div class="thin-title">買い物リスト</div>', unsafe_allow_html=True)
         
         if user_memo:

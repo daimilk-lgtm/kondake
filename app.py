@@ -32,14 +32,14 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
     
-    /* 基本フォント（細身） */
-    html, body, [class*="css"], p, div, select, input, label {
+    /* 買い物リストを含め、全ての要素を細身(300)に統一 */
+    html, body, [class*="css"], p, div, select, input, label, span {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
         color: #333;
     }
     
-    /* タイトル（極細・広間隔） */
+    /* タイトル（極細） */
     .main-title {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 100 !important;
@@ -47,36 +47,22 @@ st.markdown("""
         letter-spacing: 0.8rem;
         text-align: center;
         margin: 40px 0;
-        color: #222;
     }
 
-    /* 角丸入力欄 */
+    /* 入力欄の角丸 */
     .stSelectbox [data-baseweb="select"], .stTextInput input, .stTextArea textarea {
         border-radius: 16px !important;
         border: 1px solid #eee !important;
-        background-color: #fafafa !important;
     }
 
-    /* 印刷用：A4最適化、🔗アイコン等のノイズを排除 */
+    /* 印刷用：ノイズ排除 */
     @media print {
         .no-print, header, [data-testid="stSidebar"], .stTabs [data-baseweb="tab-list"], button, .stDivider {
             display: none !important;
         }
-        .print-area {
-            display: block !important;
-        }
-        .print-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        .print-table th, .print-table td {
-            border: 0.5px solid #ccc;
-            padding: 10px;
-            font-size: 10pt;
-            text-align: left;
-        }
-        .list-title { border-bottom: 2px solid #222; margin-top: 30px; font-size: 14pt; }
+        .print-area { display: block !important; }
+        .print-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .print-table th, .print-table td { border: 0.5px solid #ccc; padding: 10px; font-size: 10pt; }
         a { text-decoration: none !important; color: black !important; }
     }
     .print-area { display: none; }
@@ -93,7 +79,7 @@ if df is None:
 tab_plan, tab_manage = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 日曜スタート初期値
+    # 日曜スタート初期化
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
@@ -102,7 +88,7 @@ with tab_plan:
     with col_d:
         start_date = st.date_input("開始日（日）", value=default_sun)
     with col_m:
-        weekly_memo = st.text_input("週のテーマ", placeholder="例：野菜を摂る")
+        weekly_memo = st.text_input("週のテーマ", placeholder="テーマ・目標")
 
     st.divider()
 
@@ -127,7 +113,6 @@ with tab_plan:
     if st.button("確定して印刷用表示", type="primary", use_container_width=True):
         all_ings = []
         rows_html = ""
-        # 印刷用テーブルの行を生成
         for d, v in weekly_plan.items():
             rows_html += f"<tr><td>{d}</td><td>{v['主菜1']}</td><td>{v['主菜2']}</td><td>{v['副菜1']}</td><td>{v['副菜2']}</td><td>{v['汁物']}</td><td>{v['memo']}</td></tr>"
             for k, dish in v.items():
@@ -137,29 +122,30 @@ with tab_plan:
                     all_ings.extend([x.strip() for x in items if x.strip()])
         
         counts = pd.Series(all_ings).value_counts().sort_index()
-        buy_list_text = ', '.join([f"{k}({v})" if v > 1 else k for k, v in counts.items()]) if not counts.empty else "なし"
+        buy_txt = ', '.join([f"{k}({v})" if v > 1 else k for k, v in counts.items()]) if not counts.empty else "なし"
 
-        # 印刷用HTML表示
+        # 印刷用表示
         st.markdown(f"""
         <div class="print-area">
             <h1 style="font-weight:100; text-align:center;">{start_date.strftime('%Y/%m/%d')} 週 献立表</h1>
-            <p style="text-align:right;">テーマ: {weekly_memo}</p>
             <table class="print-table">
                 <thead><tr><th>日付</th><th>主菜1</th><th>主菜2</th><th>副菜1</th><th>副菜2</th><th>汁物</th><th>備考</th></tr></thead>
                 <tbody>{rows_html}</tbody>
             </table>
-            <h2 class="list-title">買い物リスト</h2>
-            <p style="font-size:11pt;">{buy_list_text}</p>
+            <h2 style="font-weight:300; border-bottom:1px solid #333; margin-top:30px;">買い物リスト</h2>
+            <p style="font-size:11pt;">{buy_txt}</p>
         </div>
         """, unsafe_allow_html=True)
 
+        # 画面用：買い物リスト
         st.subheader("🛒 買い物リスト")
         if not counts.empty:
             c1, c2 = st.columns(2)
             for idx, (item, count) in enumerate(counts.items()):
+                # チェックボックス横の文字もCSSにより細身になります
                 with (c1 if idx % 2 == 0 else c2):
                     st.checkbox(f"{item} × {count}" if count > 1 else item, key=f"b_{idx}")
-        st.success("印刷準備完了。ブラウザのメニューから「印刷」を選択してください。")
+        st.success("印刷準備完了。ブラウザメニューの「印刷」からA4出力できます。")
 
 with tab_manage:
     st.subheader("⚙️ メニュー登録")
@@ -169,5 +155,4 @@ with tab_manage:
         m = st.text_area("材料（「、」区切り）")
         if st.form_submit_button("保存"):
             if n and m:
-                new_df = pd.concat([df, pd.DataFrame([[n, c, m]], columns=df.columns)], ignore_index=True)
-                csv_b64
+                new_df = pd.concat([df, pd.DataFrame([[n, c, m]], columns=df.columns)], ignore

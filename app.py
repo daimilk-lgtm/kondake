@@ -78,12 +78,17 @@ st.markdown("""
     }
     .memo-title { font-size: 0.9rem; color: #999; margin-bottom: 10px; }
 
+    /* 印刷プレビュー修正：中身を消さずに不要なガワだけを消す */
     @media print {
-        header, [data-testid="stSidebar"], [data-testid="stHeader"], .stTabs, button, .stDivider, footer, .no-print {
+        header, [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stDecoration"], .stTabs, button, .stDivider, footer, .stException {
             display: none !important;
         }
-        [data-testid="stAppViewContainer"] > section:nth-child(2) {
-            padding-top: 0rem !important;
+        /* コンテナの余白をリセット */
+        [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stMainBlockContainer"] {
+            display: block !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
         }
         .main-title { font-size: 2.2rem !important; margin: 10px 0 !important; }
         .shopping-card { 

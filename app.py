@@ -32,12 +32,13 @@ def get_dict_data():
         return pd.read_csv(url)
     except: return None
 
-# --- 2. 究極のデザイン定義（CSS） ---
+# --- 2. デザイン定義（CSS） ---
 st.set_page_config(page_title="献だけ", layout="centered")
 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
+    
     html, body, [class*="css"], p, div, select, input, label, span, .stCheckbox {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
@@ -58,14 +59,36 @@ st.markdown("""
     }
     .shopping-card {
         background-color: #ffffff;
-        padding: 20px;
+        padding: 15px 20px;
         border-radius: 16px;
         border: 1px solid #f0f0f0;
-        margin-bottom: 20px;
+        margin-bottom: 15px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+        break-inside: avoid; /* 印刷時に途中で切れないようにする */
     }
-    .category-label { font-size: 0.8rem; font-weight: 400; color: #999; margin-bottom: 8px; }
-    .item-row { font-size: 1.2rem; font-weight: 300; padding: 5px 0; border-bottom: 0.5px solid #f9f9f9; }
+    .category-label { font-size: 0.8rem; font-weight: 400; color: #999; margin-bottom: 5px; }
+    .item-row { font-size: 1.1rem; font-weight: 300; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
+    
+    /* メモスペースのデザイン */
+    .memo-space {
+        margin-top: 20px;
+        padding: 20px;
+        border: 1px dashed #ccc;
+        border-radius: 10px;
+        min-height: 100px;
+    }
+    .memo-title { font-size: 0.9rem; color: #999; margin-bottom: 10px; }
+
+    /* 印刷用：A4一枚に収めるための設定 */
+    @media print {
+        header, [data-testid="stSidebar"], .stTabs, button, .stDivider, footer {
+            display: none !important;
+        }
+        .main-title { font-size: 2rem !important; margin: 10px 0 !important; }
+        .shopping-card { box-shadow: none !important; border: 1px solid #ccc !important; padding: 10px !important; margin-bottom: 10px !important; }
+        .item-row { font-size: 1rem !important; }
+        .stApp { background-color: white !important; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -100,7 +123,7 @@ with tab_plan:
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         st.divider()
-        st.markdown("### 🛒 買い物リスト（売場順）")
+        st.markdown("### 🛒 買い物リスト")
         
         all_ings_list = []
         for d, v in weekly_plan.items():
@@ -111,9 +134,7 @@ with tab_plan:
                     all_ings_list.extend([x.strip() for x in items if x.strip()])
         
         if all_ings_list:
-            # 個数をカウント
             counts = pd.Series(all_ings_list).value_counts()
-            
             result_data = []
             for item, count in counts.items():
                 category = "99未分類"
@@ -122,11 +143,9 @@ with tab_plan:
                         if row["材料"] in item:
                             category = row["種別"]
                             break
-                # 表示名を「材料名 × 個数」に整形
                 display_name = f"{item} × {count}" if count > 1 else item
                 result_data.append({"name": display_name, "cat": category})
             
-            # カテゴリー順にソート
             df_res = pd.DataFrame(result_data).sort_values("cat")
 
             for cat, group in df_res.groupby("cat"):
@@ -138,6 +157,15 @@ with tab_plan:
                 </div>
                 """
                 st.markdown(card_html, unsafe_allow_html=True)
+            
+            # 印刷時に便利なメモスペース
+            st.markdown("""
+                <div class="memo-space">
+                    <div class="memo-title">MEMO (その他、買い忘れなど)</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.success("リスト完成。ブラウザの『印刷』からA4出力できます。")
         else:
             st.info("メニューを選択してください。")
 

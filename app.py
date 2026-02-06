@@ -64,7 +64,6 @@ st.markdown("""
         border: 1px solid #f0f0f0;
         margin-bottom: 15px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-        break-inside: avoid;
     }
     .category-label { font-size: 0.8rem; font-weight: 400; color: #999; margin-bottom: 5px; }
     .item-row { font-size: 1.1rem; font-weight: 300; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
@@ -78,31 +77,30 @@ st.markdown("""
     }
     .memo-title { font-size: 0.9rem; color: #999; margin-bottom: 10px; }
 
-    /* 印刷プレビュー修正：中身を消さずに不要なガワだけを消す */
+    /* 印刷用表示エリア（通常時は隠す） */
+    .print-only { display: none; }
+
+    /* 印刷プレビューの決定打：全要素を一度消し、印刷専用エリアだけを強制表示 */
     @media print {
-        header, [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stDecoration"], .stTabs, button, .stDivider, footer, .stException {
-            display: none !important;
-        }
-        /* コンテナの余白をリセット */
-        [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stMainBlockContainer"] {
+        body * { visibility: hidden; }
+        .print-only, .print-only * { visibility: visible; }
+        .print-only {
             display: block !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            width: 100% !important;
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
         }
-        .main-title { font-size: 2.2rem !important; margin: 10px 0 !important; }
         .shopping-card { 
             box-shadow: none !important; 
             border: 1px solid #eee !important; 
-            padding: 10px !important; 
-            margin-bottom: 10px !important; 
+            break-inside: avoid;
         }
-        .item-row { font-size: 1rem !important; }
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title no-print">献だけ</h1>', unsafe_allow_html=True)
 
 df_menu, sha = get_menu_data()
 df_dict = get_dict_data()
@@ -158,18 +156,33 @@ with tab_plan:
             
             df_res = pd.DataFrame(result_data).sort_values("cat")
 
+            # --- 画面表示用と印刷専用エリアの同時生成 ---
+            cards_html = ""
             for cat, group in df_res.groupby("cat"):
                 items_html = "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()])
-                st.markdown(f"""
+                cards_html += f"""
                 <div class="shopping-card">
                     <div class="category-label">{cat}</div>
                     {items_html}
                 </div>
-                """, unsafe_allow_html=True)
+                """
             
-            st.markdown("""
+            memo_html = """
                 <div class="memo-space">
                     <div class="memo-title">MEMO (その他、買い忘れなど)</div>
+                </div>
+            """
+
+            # 画面への表示
+            st.markdown(cards_html + memo_html, unsafe_allow_html=True)
+            
+            # 印刷専用エリア（CSSで印刷時のみ表示される）
+            st.markdown(f"""
+                <div class="print-only">
+                    <h1 style="font-family: 'Noto Sans JP'; font-weight: 100; text-align: center; font-size: 2.2rem; letter-spacing: 0.5rem;">献だけ</h1>
+                    <div style="font-size: 0.9rem; text-align: right; margin-bottom: 10px;">{start_date.strftime('%Y/%m/%d')} 週</div>
+                    {cards_html}
+                    {memo_html}
                 </div>
             """, unsafe_allow_html=True)
             

@@ -25,21 +25,21 @@ def get_data():
         pass
     return None, None
 
-# --- 2. デザイン定義（CSS） ---
+# --- 2. 究極のデザイン定義（CSS） ---
 st.set_page_config(page_title="献だけ", layout="centered")
 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
     
-    /* 買い物リストを含め、全ての要素を細身(300)に統一 */
-    html, body, [class*="css"], p, div, select, input, label, span {
+    /* 買い物リスト、チェックボックス、ラベル等、全ての文字を細身(300)に統一 */
+    html, body, [class*="css"], p, div, select, input, label, span, .stCheckbox {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
         color: #333;
     }
     
-    /* タイトル（極細） */
+    /* 極細タイトルロゴ */
     .main-title {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 100 !important;
@@ -49,20 +49,26 @@ st.markdown("""
         margin: 40px 0;
     }
 
-    /* 入力欄の角丸 */
+    /* 角丸モダンUI */
     .stSelectbox [data-baseweb="select"], .stTextInput input, .stTextArea textarea {
         border-radius: 16px !important;
         border: 1px solid #eee !important;
+        background-color: #fafafa !important;
     }
 
-    /* 印刷用：ノイズ排除 */
+    /* 印刷用：A4最適化デザイン */
     @media print {
         .no-print, header, [data-testid="stSidebar"], .stTabs [data-baseweb="tab-list"], button, .stDivider {
             display: none !important;
         }
-        .print-area { display: block !important; }
+        .print-area { display: block !important; width: 100% !important; }
         .print-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        .print-table th, .print-table td { border: 0.5px solid #ccc; padding: 10px; font-size: 10pt; }
+        .print-table th, .print-table td { 
+            border: 0.5px solid #ccc; 
+            padding: 10px; 
+            font-size: 10pt; 
+            font-weight: 300; /* 印刷時も細身 */
+        }
         a { text-decoration: none !important; color: black !important; }
     }
     .print-area { display: none; }
@@ -124,7 +130,7 @@ with tab_plan:
         counts = pd.Series(all_ings).value_counts().sort_index()
         buy_txt = ', '.join([f"{k}({v})" if v > 1 else k for k, v in counts.items()]) if not counts.empty else "なし"
 
-        # 印刷用表示
+        # 印刷用レイアウトHTML
         st.markdown(f"""
         <div class="print-area">
             <h1 style="font-weight:100; text-align:center;">{start_date.strftime('%Y/%m/%d')} 週 献立表</h1>
@@ -133,19 +139,18 @@ with tab_plan:
                 <tbody>{rows_html}</tbody>
             </table>
             <h2 style="font-weight:300; border-bottom:1px solid #333; margin-top:30px;">買い物リスト</h2>
-            <p style="font-size:11pt;">{buy_txt}</p>
+            <p style="font-size:11pt; font-weight:300;">{buy_txt}</p>
         </div>
         """, unsafe_allow_html=True)
 
-        # 画面用：買い物リスト
         st.subheader("🛒 買い物リスト")
         if not counts.empty:
             c1, c2 = st.columns(2)
             for idx, (item, count) in enumerate(counts.items()):
-                # チェックボックス横の文字もCSSにより細身になります
                 with (c1 if idx % 2 == 0 else c2):
+                    # CSSによりこのテキストも細身(300)になります
                     st.checkbox(f"{item} × {count}" if count > 1 else item, key=f"b_{idx}")
-        st.success("印刷準備完了。ブラウザメニューの「印刷」からA4出力できます。")
+        st.success("印刷準備完了。ブラウザの「印刷」からA4で出力できます。")
 
 with tab_manage:
     st.subheader("⚙️ メニュー登録")
@@ -155,4 +160,16 @@ with tab_manage:
         m = st.text_area("材料（「、」区切り）")
         if st.form_submit_button("保存"):
             if n and m:
-                new_df = pd.concat([df, pd.DataFrame([[n, c, m]], columns=df.columns)], ignore
+                # SyntaxErrorのあった箇所：括弧を確実に閉じ、安全に連結
+                new_row = pd.DataFrame([[n, c, m]], columns=df.columns)
+                new_df = pd.concat([df, new_row], ignore_index=True)
+                csv_b64 = base64.b64encode(new_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8")).decode("utf-8")
+                res = requests.put(
+                    f"https://api.github.com/repos/{REPO}/contents/{FILE}", 
+                    headers={"Authorization": f"token {TOKEN}"},
+                    json={"message": f"Add {n}", "content": csv_b64, "sha": sha}
+                )
+                if res.status_code == 200:
+                    st.cache_data.clear()
+                    st.rerun()
+    st.dataframe(df, use_container_width=True)

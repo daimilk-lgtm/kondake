@@ -6,22 +6,32 @@ from google.oauth2.service_account import Credentials
 # --- 1. 接続・認証 ---
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=10) # 開発中は短めに設定（10秒）
 def get_data():
     try:
         creds_dict = dict(st.secrets)
         if "private_key" in creds_dict:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        
         spread = Spread("献だけデータ", creds=creds)
-        df = spread.sheet_to_df(index=None)
+        
+        # 【重要】シート名を明示的に「シート1」と指定し、確実にデータを取得する
+        df = spread.sheet_to_df(sheet="シート1", index=None)
+        
+        # もしデータが空なら、空のDataFrameを返す（エラー防止）
+        if df.empty:
+            return spread, pd.DataFrame(columns=["料理名", "カテゴリー", "材料"])
+            
         return spread, df
-    except:
+    except Exception as e:
+        # エラー時は画面に表示させて原因を特定する
+        st.error(f"データ読み込みエラー: {e}")
         return None, pd.DataFrame(columns=["料理名", "カテゴリー", "材料"])
 
 spread, df_master = get_data()
 
-# --- 2. 視覚設計（タイトル等間隔・アイコン保護） ---
+# --- 2. デザイン：等間隔タイトル & アイコン保護 ---
 st.set_page_config(page_title="献だけ", layout="wide")
 
 st.markdown("""
@@ -33,7 +43,6 @@ st.markdown("""
         font-weight: 300 !important;
     }
 
-    /* タイトルエリア：文字間隔を等間隔（0.5em）に設定 */
     .title-wrapper {
         text-align: center;
         padding: 4rem 0 3rem 0;
@@ -41,11 +50,10 @@ st.markdown("""
     .title-text {
         font-size: 3.5rem;
         font-weight: 300;
-        letter-spacing: 0.5em; /* 等間隔にするための設定 */
-        margin-right: -0.5em; /* 最後の文字の後ろにできる余白を打ち消して中央に */
+        letter-spacing: 0.5em;
+        margin-right: -0.5em;
         color: #333;
     }
-    
     b, strong, th, label { font-weight: 300 !important; }
 </style>
 <div class="title-wrapper">
@@ -66,14 +74,20 @@ for i, tab in enumerate(st_tabs):
         day_plan = {}
         for j, cat in enumerate(categories):
             with cols[j]:
-                options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist() if not df_master.empty else []
-                val = st.selectbox(cat, ["選択なし"] + options, key=f"fixed_{tabs_list[i]}_{cat}")
+                # フィルタリング（確実に一致させるためスペースを除去）
+                if not df_master.empty:
+                    df_master["カテゴリー"] = df_master["カテゴリー"].str.strip()
+                    options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist()
+                else:
+                    options = []
+                
+                val = st.selectbox(cat, ["選択なし"] + options, key=f"v4_{tabs_list[i]}_{cat}")
                 day_plan[cat] = val
         selected_plan[tabs_list[i]] = day_plan
 
 # --- 4. 買い物リスト ＆ メニュー表 ---
 st.write("")
-if st.button("こんだけ作成"):
+if st.button("こんだけ作成", key="main_btn"):
     st.divider()
     res_col1, res_col2 = st.columns([3, 2])
     
@@ -102,14 +116,14 @@ if st.button("こんだけ作成"):
         unique_ings = sorted(list(set(all_ingredients)))
         if unique_ings:
             for item in unique_ings:
-                st.checkbox(item, key=f"buy_fixed_{item}")
+                st.checkbox(item, key=f"buy_v4_{item}")
         else:
             st.write("メニューを選んでください。")
 
 # --- 5. 追加・修正機能 ---
 st.write("---")
 with st.expander("📝 料理の追加・内容の修正"):
-    with st.form("editor_fixed", clear_on_submit=True):
+    with st.form("editor_v4", clear_on_submit=True):
         f_c1, f_c2 = st.columns(2)
         with f_c1:
             name = st.text_input("料理名")
@@ -122,6 +136,7 @@ with st.expander("📝 料理の追加・内容の修正"):
                 new_df = df_master[df_master["料理名"] != name]
                 add_data = pd.DataFrame([[name, cat, ing]], columns=["料理名", "カテゴリー", "材料"])
                 final_df = pd.concat([new_df, add_data], ignore_index=True)
-                spread.df_to_sheet(final_df, index=False, replace=True)
+                # シート名を指定して保存
+                spread.df_to_sheet(final_df, index=False, replace=True, sheet="シート1")
                 st.success(f"「{name}」を保存しました。")
                 st.cache_data.clear()

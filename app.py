@@ -11,16 +11,20 @@ scope = [
 
 def get_data_from_sheets():
     try:
-        # Secretsを読み込む。見出しがあってもなくても対応できる書き方
         s = st.secrets
         creds_dict = s["gcp_service_account"] if "gcp_service_account" in s else dict(s)
         
+        # 【重要】鍵の中にある「変な改行」や「スペース」を自動でお掃除する
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
+
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         # スプレッドシート「献だけデータ」を開く
         spread = Spread("献だけデータ", creds=creds)
         df = spread.sheet_to_df(index=None)
         return spread, df
     except Exception as e:
+        # エラーが出ても詳細を表示して原因を突き止める
         st.error(f"接続エラー: {e}")
         return None, pd.DataFrame(columns=["料理名", "カテゴリー", "材料"])
 
@@ -44,7 +48,8 @@ if not df_master.empty:
                     options = df_master[df_master["カテゴリー"] == cat]["料理名"].tolist()
                     st.selectbox(cat, ["なし"] + options, key=f"{tabs[i]}_{cat}")
 else:
-    st.warning("スプレッドシートにデータがないか、読み込めていません。")
+    # 接続はできたけどシートが空の場合
+    st.info("スプレッドシートとの接続は成功しましたが、データがまだ空です。下のフォームから料理を追加してください。")
 
 # --- 4. 料理の追加機能 ---
 st.divider()

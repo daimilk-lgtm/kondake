@@ -21,23 +21,25 @@ def get_data():
             df = pd.read_csv(io.StringIO(raw))
             df.columns = [c.strip() for c in df.columns]
             return df, r.json()["sha"]
-    except: pass
+    except Exception:
+        pass
     return None, None
 
-# --- 2. デザイン・スタイル定義（CSS） ---
+# --- 2. デザイン定義（CSS） ---
 st.set_page_config(page_title="献だけ", layout="centered")
 
-# エラーの原因となっていた中括弧をエスケープしたCSS定義
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
     
+    /* 基本フォント（細身） */
     html, body, [class*="css"], p, div, select, input, label {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
         color: #333;
     }
     
+    /* タイトル（極細・広間隔） */
     .main-title {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 100 !important;
@@ -48,19 +50,20 @@ st.markdown("""
         color: #222;
     }
 
+    /* 角丸入力欄 */
     .stSelectbox [data-baseweb="select"], .stTextInput input, .stTextArea textarea {
         border-radius: 16px !important;
         border: 1px solid #eee !important;
-        padding: 10px !important;
+        background-color: #fafafa !important;
     }
 
+    /* 印刷用：A4最適化、🔗アイコン等のノイズを排除 */
     @media print {
         .no-print, header, [data-testid="stSidebar"], .stTabs [data-baseweb="tab-list"], button, .stDivider {
             display: none !important;
         }
         .print-area {
             display: block !important;
-            width: 100% !important;
         }
         .print-table {
             width: 100%;
@@ -69,14 +72,11 @@ st.markdown("""
         }
         .print-table th, .print-table td {
             border: 0.5px solid #ccc;
-            padding: 12px;
+            padding: 10px;
+            font-size: 10pt;
             text-align: left;
-            font-size: 11pt;
-            font-weight: 300;
         }
-        .print-table th { background-color: #fafafa; }
-        .list-title { border-bottom: 2px solid #222; margin-top: 40px; font-size: 16pt; font-weight: 400; }
-        /* 印刷時に余計なリンクアイコン（🔗）が出るのを防ぐ */
+        .list-title { border-bottom: 2px solid #222; margin-top: 30px; font-size: 14pt; }
         a { text-decoration: none !important; color: black !important; }
     }
     .print-area { display: none; }
@@ -93,6 +93,7 @@ if df is None:
 tab_plan, tab_manage = st.tabs(["🗓 献立作成", "⚙️ メニュー管理"])
 
 with tab_plan:
+    # 日曜スタート初期値
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
@@ -101,7 +102,7 @@ with tab_plan:
     with col_d:
         start_date = st.date_input("開始日（日）", value=default_sun)
     with col_m:
-        weekly_memo = st.text_input("今週の全体テーマ", placeholder="例：旬の野菜を食べる")
+        weekly_memo = st.text_input("週のテーマ", placeholder="例：野菜を摂る")
 
     st.divider()
 
@@ -120,12 +121,13 @@ with tab_plan:
             for cat in cats:
                 opts = df[df["カテゴリー"] == cat]["料理名"].tolist()
                 day_menu[cat] = st.selectbox(cat, ["なし"] + opts, key=f"s_{i}_{cat}")
-            day_menu["memo"] = st.text_area("予定・備考", placeholder="例：遅め", key=f"m_{i}", height=80)
+            day_menu["memo"] = st.text_area("備考", placeholder="予定など", key=f"m_{i}", height=80)
             weekly_plan[d_str] = day_menu
 
-    if st.button("献立を確定して印刷用レイアウトを表示", type="primary", use_container_width=True):
+    if st.button("確定して印刷用表示", type="primary", use_container_width=True):
         all_ings = []
         rows_html = ""
+        # 印刷用テーブルの行を生成
         for d, v in weekly_plan.items():
             rows_html += f"<tr><td>{d}</td><td>{v['主菜1']}</td><td>{v['主菜2']}</td><td>{v['副菜1']}</td><td>{v['副菜2']}</td><td>{v['汁物']}</td><td>{v['memo']}</td></tr>"
             for k, dish in v.items():
@@ -135,24 +137,21 @@ with tab_plan:
                     all_ings.extend([x.strip() for x in items if x.strip()])
         
         counts = pd.Series(all_ings).value_counts().sort_index()
-        buy_list_text = ', '.join([f"{k} ({v})" if v > 1 else k for k, v in counts.items()]) if not counts.empty else "なし"
+        buy_list_text = ', '.join([f"{k}({v})" if v > 1 else k for k, v in counts.items()]) if not counts.empty else "なし"
 
-        # 印刷用HTML：エラーを避けるため f-string を慎重に構成
-        print_html = f"""
+        # 印刷用HTML表示
+        st.markdown(f"""
         <div class="print-area">
-            <h1 style="font-weight:100; text-align:center;">{start_date.strftime('%Y/%m/%d')} 週の献立表</h1>
+            <h1 style="font-weight:100; text-align:center;">{start_date.strftime('%Y/%m/%d')} 週 献立表</h1>
             <p style="text-align:right;">テーマ: {weekly_memo}</p>
             <table class="print-table">
-                <thead>
-                    <tr><th>日付</th><th>主菜1</th><th>主菜2</th><th>副菜1</th><th>副菜2</th><th>汁物</th><th>備考</th></tr>
-                </thead>
+                <thead><tr><th>日付</th><th>主菜1</th><th>主菜2</th><th>副菜1</th><th>副菜2</th><th>汁物</th><th>備考</th></tr></thead>
                 <tbody>{rows_html}</tbody>
             </table>
             <h2 class="list-title">買い物リスト</h2>
-            <p style="font-size:12pt; line-height:1.8;">{buy_list_text}</p>
+            <p style="font-size:11pt;">{buy_list_text}</p>
         </div>
-        """
-        st.markdown(print_html, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
         st.subheader("🛒 買い物リスト")
         if not counts.empty:
@@ -160,7 +159,15 @@ with tab_plan:
             for idx, (item, count) in enumerate(counts.items()):
                 with (c1 if idx % 2 == 0 else c2):
                     st.checkbox(f"{item} × {count}" if count > 1 else item, key=f"b_{idx}")
-        st.success("印刷用レイアウトが整いました。ブラウザの共有/メニューから「印刷」を選択してください。")
+        st.success("印刷準備完了。ブラウザのメニューから「印刷」を選択してください。")
 
 with tab_manage:
-    st.subheader("
+    st.subheader("⚙️ メニュー登録")
+    with st.form("add", clear_on_submit=True):
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", cats)
+        m = st.text_area("材料（「、」区切り）")
+        if st.form_submit_button("保存"):
+            if n and m:
+                new_df = pd.concat([df, pd.DataFrame([[n, c, m]], columns=df.columns)], ignore_index=True)
+                csv_b64

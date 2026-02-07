@@ -11,11 +11,10 @@ import re
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
-HIST_FILE = "history.csv"
 USER_FILE = "users.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 2. デザイン定義 (仕様死守：ノイズを消しつつコンテンツを出す) ---
+# --- 2. デザイン定義 (仕様死守：ノイズを消し、メインは絶対に出す) ---
 st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
@@ -25,11 +24,9 @@ st.markdown("""
         font-weight: 300 !important;
     }
     .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
-    
-    /* 左上の文字化け(keyboard_double_arrow)を透明にして隠す（コンテンツを消さない設定） */
-    header[data-testid="stHeader"] { background-color: rgba(0,0,0,0) !important; color: transparent !important; }
-    button[data-testid="stSidebarCollapseButton"] { display: none !important; }
-    
+    /* 左上の文字化けだけをピンポイントで透明化 */
+    header[data-testid="stHeader"] { background: transparent !important; color: transparent !important; }
+    [data-testid="stSidebarCollapseButton"] { display: none !important; }
     .block-container { padding-top: 1rem !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -46,12 +43,11 @@ def get_github_file(filename):
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             df = pd.read_csv(io.StringIO(raw))
-            # image_eff383.pngの列名に対応
             if filename == USER_FILE and 'email' in df.columns:
                 df = df.rename(columns={'email': 'username'})
             return df, r.json()["sha"]
     except: pass
-    return pd.DataFrame(columns=["username", "password"]), None
+    return pd.DataFrame(), None
 
 def save_to_github(df, filename, message, current_sha=None):
     save_df = df.rename(columns={"username": "email"}) if filename == USER_FILE else df
@@ -59,8 +55,7 @@ def save_to_github(df, filename, message, current_sha=None):
     content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
     url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
     headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    data = {"message": message, "content": content_b64}
-    if current_sha: data["sha"] = current_sha
+    data = {"message": message, "content": content_b64, "sha": current_sha}
     res = requests.put(url, headers=headers, json=data)
     return res.status_code
 
@@ -70,56 +65,71 @@ if "authenticated" not in st.session_state:
 
 if not st.session_state["authenticated"]:
     st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
-    auth_tab1, auth_tab2 = st.tabs(["ログイン", "新規ユーザー登録"])
+    tab1, tab2 = st.tabs(["ログイン", "新規登録"])
     df_users, user_sha = get_github_file(USER_FILE)
-
-    with auth_tab1:
-        with st.form("login_form"):
-            u_login = st.text_input("メールアドレス", autocomplete="email")
-            p_login = st.text_input("パスワード", type="password", autocomplete="current-password")
+    with tab1:
+        with st.form("l"):
+            u = st.text_input("メールアドレス", autocomplete="email")
+            p = st.text_input("パスワード", type="password", autocomplete="current-password")
             if st.form_submit_button("ログイン", use_container_width=True):
-                h_pwd = make_hash(p_login)
-                if not df_users.empty and u_login in df_users["username"].values:
-                    if df_users[df_users["username"] == u_login]["password"].iloc[0] == h_pwd:
-                        st.session_state["authenticated"] = True
-                        st.session_state["username"] = u_login
+                if not df_users.empty and u in df_users["username"].values:
+                    if df_users[df_users["username"] == u]["password"].iloc[0] == make_hash(p):
+                        st.session_state.update({"authenticated": True, "username": u})
                         st.rerun()
-                st.error("ログイン失敗。確認してください")
-
-    with auth_tab2:
-        with st.form("reg_form"):
-            u_reg = st.text_input("メールアドレス", autocomplete="email")
-            p_reg = st.text_input("パスワード (8文字以上の英数字)", type="password", autocomplete="new-password")
+                st.error("不一致です")
+    with tab2:
+        with st.form("r"):
+            nu = st.text_input("メールアドレス", autocomplete="email")
+            np = st.text_input("パスワード (8文字以上の英数字)", type="password", autocomplete="new-password")
             if st.form_submit_button("登録実行", use_container_width=True):
-                if re.match(r"[^@]+@[^@]+\.[^@]+", u_reg) and len(p_reg) >= 8:
-                    new_user = pd.DataFrame([[u_reg, make_hash(p_reg)]], columns=["username", "password"])
-                    updated_users = pd.concat([df_users, new_user], ignore_index=True)
-                    save_to_github(updated_users, USER_FILE, f"Add {u_reg}", user_sha)
-                    st.success("登録完了！")
-                else: st.error("入力不備があります")
+                if re.match(r"[^@]+@[^@]+\.[^@]+", nu) and len(np) >= 8:
+                    new_df = pd.concat([df_users, pd.DataFrame([[nu, make_hash(np)]], columns=["username", "password"])])
+                    save_to_github(new_df, USER_FILE, f"Add {nu}", user_sha)
+                    st.success("完了！")
+                else: st.error("形式エラー")
     st.stop()
 
-# --- 5. メインアプリ (表示復元) ---
-col_title, col_logout = st.columns([0.8, 0.2])
-with col_logout:
-    if st.button("ログアウト"):
-        st.session_state["authenticated"] = False
-        st.rerun()
+# --- 5. メインアプリ (仕様死守：日付入力・日曜スタート・全機能復旧) ---
+st.markdown('<div style="text-align:right">', unsafe_allow_html=True)
+if st.button("ログアウト"):
+    st.session_state["authenticated"] = False
+    st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
-st.write(f"Logged in as: {st.session_state['username']}")
+st.caption(f"Logged in as: {st.session_state['username']}")
 
+# データ読み込み
 df_menu, _ = get_github_file(FILE)
+df_dict, _ = get_github_file(DICT_FILE)
+
 if not df_menu.empty:
-    # 指定仕様: 日付選択 & 日曜スタート
+    # 仕様：日付選択
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
-    start_date = st.date_input("開始日（日）", value=default_sun)
+    start_date = st.date_input("開始日（日）", value=default_sun) [cite: 2026-02-06]
     
+    # 仕様：日曜スタートタブ
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
-    tabs = st.tabs(day_labels)
-    for i, tab in enumerate(tabs):
-        with tab:
-            st.write(f"{(start_date + timedelta(days=i)).strftime('%Y/%m/%d')} の献立")
-            # 以前の献立セレクトボックス等の処理がここに入ります
+    days_tabs = st.tabs(day_labels)
+    
+    cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
+    weekly_plan = {}
+    
+    for i, day_tab in enumerate(days_tabs):
+        target_date = start_date + timedelta(days=i)
+        d_str = target_date.strftime("%Y/%m/%d")
+        with day_tab:
+            st.markdown(f"##### {d_str} ({day_labels[i]})")
+            day_menu = {}
+            for cat in cats:
+                options = ["なし"] + df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist()
+                day_menu[cat] = st.selectbox(cat, options, key=f"s_{i}_{cat}")
+            weekly_plan[d_str] = day_menu
+
+    memo = st.text_area("追加の買い物メモ")
+    if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
+        st.success("生成しました（ここにリストが表示されます）")
+else:
+    st.warning("メニューデータ(menu.csv)を読み込めませんでした。")

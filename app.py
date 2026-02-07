@@ -1,5 +1,5 @@
 import streamlit as st
-import pd
+import pandas as pd
 import requests
 import base64
 import io
@@ -17,7 +17,7 @@ def validate_system_integrity():
     return check_results
 
 # --- 1. 設定 ---
-VERSION = "test-v1.1.2"
+VERSION = "test-v1.1.3"
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
@@ -35,12 +35,11 @@ st.markdown("""
     .category-label { font-size: 0.8rem; color: #999; border-bottom: 1px solid #f9f9f9; margin-bottom: 5px; }
     
     /* 履歴テーブル用スタイル調整 */
-    .history-table td { white-space: normal !important; word-wrap: break-word !important; }
-    /* 日付と曜日の列を折り返さない設定 */
-    .history-table td:nth-child(1), .history-table td:nth-child(2) { white-space: nowrap !important; }
-    /* 列幅の明示的な指定 */
-    .history-table th:nth-child(1) { width: 110px !important; }
-    .history-table th:nth-child(2) { width: 50px !important; }
+    .history-container table { width: 100% !important; border-collapse: collapse; }
+    .history-container td, .history-container th { white-space: normal !important; word-wrap: break-word !important; border: 1px solid #eee; padding: 8px; text-align: left; }
+    /* 日付(1列目)と曜日(2列目)の折り返し禁止と幅指定 */
+    .history-container td:nth-child(1), .history-container th:nth-child(1) { white-space: nowrap !important; width: 100px !important; }
+    .history-container td:nth-child(2), .history-container th:nth-child(2) { white-space: nowrap !important; width: 40px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -93,7 +92,7 @@ with t_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v112_{i}_{c}") for c in cats}
+            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v113_{i}_{c}") for c in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
     memo = st.text_area("メモ")
@@ -156,15 +155,13 @@ with t_hist:
         if "uid" in df_hist.columns:
             group_cols.append("uid")
         
+        # タイミングごとに集約
         display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
         display_df = display_df.sort_values("日付", ascending=False)
         
-        # 料理名のみを抽出し、不要なインデックス（左端の数字）を削除して表示
-        st.markdown('<div class="history-table">', unsafe_allow_html=True)
-        # index=False で左端の列を削除
-        st.table(display_df[["日付", "曜日", "料理名"]].assign(dummy="").set_index("dummy").index.rename(None))
-        # 代わりに、インデックスなしのHTMLテーブルとして直接出力
-        st.write(display_df[["日付", "曜日", "料理名"]].to_html(index=False, classes="history-table", escape=False), unsafe_allow_html=True)
+        # HTML形式でインデックス列なしのテーブルを出力
+        st.markdown('<div class="history-container">', unsafe_allow_html=True)
+        st.write(display_df[["日付", "曜日", "料理名"]].to_html(index=False, escape=False), unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
 with t_manage:

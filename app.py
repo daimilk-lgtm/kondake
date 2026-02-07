@@ -8,17 +8,17 @@ from datetime import datetime, timedelta
 import hashlib
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.4.0" 
+VERSION = "1.4.1" 
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
 HIST_FILE = "history.csv"
-USER_FILE = "users.csv"  # ユーザー情報保存用
+USER_FILE = "users.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 2. デザイン定義 (最優先適用) ---
+# --- 2. デザイン定義 (最優先・変更禁止) ---
 st.set_page_config(page_title="献だけ", layout="centered")
 st.markdown("""
 <style>
@@ -45,8 +45,15 @@ def get_github_file(filename):
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
-            return pd.read_csv(io.StringIO(raw)), r.json()["sha"]
+            df = pd.read_csv(io.StringIO(raw))
+            # カラムが足りない場合のエラー回避
+            if filename == USER_FILE and "username" not in df.columns:
+                return pd.DataFrame(columns=["username", "password"]), r.json()["sha"]
+            return df, r.json()["sha"]
     except: pass
+    # ファイルが存在しない場合は空のDFを返す
+    if filename == USER_FILE:
+        return pd.DataFrame(columns=["username", "password"]), None
     return None, None
 
 def save_to_github(df, filename, message, current_sha=None):
@@ -68,8 +75,6 @@ if not st.session_state["authenticated"]:
     auth_tab1, auth_tab2 = st.tabs(["ログイン", "新規ユーザー登録"])
     
     df_users, user_sha = get_github_file(USER_FILE)
-    if df_users is None:
-        df_users = pd.DataFrame(columns=["username", "password"])
 
     with auth_tab1:
         with st.form("login_form"):
@@ -77,12 +82,14 @@ if not st.session_state["authenticated"]:
             p_login = st.text_input("パスワード", type="password")
             if st.form_submit_button("ログイン", use_container_width=True):
                 h_pwd = make_hash(p_login)
-                if not df_users[(df_users["username"] == u_login) & (df_users["password"] == h_pwd)].empty:
-                    st.session_state["authenticated"] = True
-                    st.session_state["username"] = u_login
-                    st.rerun()
-                else:
-                    st.error("ユーザー名またはパスワードが正しくありません")
+                # ユーザー検索時のKeyError対策を強化
+                if not df_users.empty and "username" in df_users.columns:
+                    match = df_users[(df_users["username"] == u_login) & (df_users["password"] == h_pwd)]
+                    if not match.empty:
+                        st.session_state["authenticated"] = True
+                        st.session_state["username"] = u_login
+                        st.rerun()
+                st.error("ユーザー名またはパスワードが正しくありません")
 
     with auth_tab2:
         with st.form("reg_form"):
@@ -101,9 +108,9 @@ if not st.session_state["authenticated"]:
                     st.error("入力してください")
     st.stop()
 
-# --- 5. メインアプリ (仕様を完全維持) ---
+# --- 5. メインアプリ (仕様維持: 日付入力/日曜開始) ---
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
-st.sidebar.write(f"Logged in as: {st.session_state['username']}")
+st.sidebar.write(f"User: {st.session_state['username']}")
 if st.sidebar.button("ログアウト"):
     st.session_state["authenticated"] = False
     st.rerun()
@@ -113,20 +120,20 @@ df_dict, _ = get_github_file(DICT_FILE)
 df_hist, hist_sha = get_github_file(HIST_FILE)
 
 if df_menu is None:
-    st.error("データの読み込みに失敗しました。")
+    st.error("メニューデータの読み込みに失敗しました。")
     st.stop()
 
 cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 仕様遵守: 日付はユーザーに入力させる
+    # 指定仕様: 日付はユーザーに入力させる
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
     start_date = st.date_input("開始日（日）", value=default_sun)
     
-    # 仕様遵守: 日曜スタートにする
+    # 指定仕様: 日曜スタート
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
@@ -190,7 +197,6 @@ with tab_plan:
                 }};
                 </script>""", height=80)
 
-# --- 履歴・管理タブは以前のロジックのまま維持 ---
 with tab_hist:
     st.subheader("過去の履歴")
     if df_hist is not None and not df_hist.empty:

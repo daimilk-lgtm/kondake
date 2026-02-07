@@ -27,6 +27,10 @@ st.markdown("""
     header[data-testid="stHeader"] { background: transparent !important; color: transparent !important; }
     [data-testid="stSidebarCollapseButton"] { display: none !important; }
     .block-container { padding-top: 1rem !important; }
+    
+    /* UI崩れ対策: エクスパンダーのラベル重なりを強制修正 */
+    .st-emotion-cache-p4mnd5 { display: none !important; } /* 特定環境でのアイコンバグを消去 */
+    summary { font-size: 1.1rem; font-weight: 400 !important; padding: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -42,7 +46,7 @@ def get_github_file(filename):
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             df = pd.read_csv(io.StringIO(raw))
-            # ユーザーデータの列名補正
+            # GitHub(email) -> コード(username)
             if filename == USER_FILE and 'email' in df.columns:
                 df = df.rename(columns={'email': 'username'})
             return df, r.json()["sha"]
@@ -50,6 +54,7 @@ def get_github_file(filename):
     return pd.DataFrame(), None
 
 def save_to_github(df, filename, message, current_sha=None):
+    # 保存時は email に戻す
     save_df = df.rename(columns={"username": "email"}) if filename == USER_FILE else df
     csv_content = save_df.to_csv(index=False, encoding="utf-8-sig")
     content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
@@ -76,19 +81,19 @@ if not st.session_state["authenticated"]:
                     if df_users[df_users["username"] == u]["password"].iloc[0] == make_hash(p):
                         st.session_state.update({"authenticated": True, "username": u})
                         st.rerun()
-                st.error("ログイン失敗")
+                st.error("ログイン情報が異なります")
     with t2:
         with st.form("r"):
             nu = st.text_input("メールアドレス", key="ur", autocomplete="email")
-            np = st.text_input("パスワード", type="password", key="pr", autocomplete="new-password")
-            if st.form_submit_button("登録", use_container_width=True):
+            np = st.text_input("パスワード (8文字以上)", type="password", key="pr", autocomplete="new-password")
+            if st.form_submit_button("登録実行", use_container_width=True):
                 if re.match(r"[^@]+@[^@]+\.[^@]+", nu) and len(np) >= 8:
                     new_df = pd.concat([df_users, pd.DataFrame([[nu, make_hash(np)]], columns=["username", "password"])])
                     save_to_github(new_df, USER_FILE, f"Add {nu}", user_sha)
-                    st.success("登録完了")
+                    st.success("登録完了。ログインしてください")
     st.stop()
 
-# --- 5. メインアプリ (3タブ構造) ---
+# --- 5. メインアプリ (3タブ) ---
 st.markdown('<div style="text-align:right">', unsafe_allow_html=True)
 if st.button("ログアウト"):
     st.session_state["authenticated"] = False
@@ -122,31 +127,32 @@ with t_plan:
         st.button("確定して買い物リストを生成", type="primary", use_container_width=True)
 
 with t_hist:
-    st.info("履歴機能（準備中）")
+    st.info("過去の買い物リスト履歴がここに表示されます")
 
 with t_manage:
     st.subheader("登録メニュー一覧")
     if not df_menu.empty:
-        # 画像通り「料理名」「カテゴリー」「材料」の順で表示
-        display_df = df_menu[["料理名", "カテゴリー", "材料"]] if "材料" in df_menu.columns else df_menu
+        # 画像 image_f068b5.png の順序：料理名, カテゴリー, 材料
+        cols = ["料理名", "カテゴリー", "材料"]
+        display_df = df_menu[cols] if set(cols).issubset(df_menu.columns) else df_menu
         st.dataframe(display_df, use_container_width=True, hide_index=True)
         
-        # UI崩れを修正：不具合のあった部分を標準エキスパンダーへ
-        with st.expander("＋ 新しい料理を追加"):
-            with st.form("add_new_dish", clear_on_submit=True):
-                col1, col2 = st.columns(2)
-                with col1:
-                    n_cat = st.selectbox("カテゴリー", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"])
-                with col2:
-                    n_name = st.text_input("料理名")
-                n_ing = st.text_area("材料（カンマ区切り）")
+        # UI崩れ（_arrow_right露出）を回避するための明示的タイトル
+        with st.expander("新しい料理を追加"):
+            with st.form("new_dish_form", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                with c1:
+                    new_cat = st.selectbox("カテゴリー", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"])
+                with c2:
+                    new_name = st.text_input("料理名")
+                new_ing = st.text_area("材料（カンマ区切り）")
                 
-                if st.form_submit_button("メニューに保存"):
-                    if n_name:
-                        new_row = pd.DataFrame([[n_name, n_cat, n_ing]], columns=["料理名", "カテゴリー", "材料"])
-                        updated_menu = pd.concat([df_menu, new_row], ignore_index=True)
-                        save_to_github(updated_menu, FILE, f"Add {n_name}", menu_sha)
-                        st.success(f"「{n_name}」を保存しました。")
+                if st.form_submit_button("メニューを保存"):
+                    if new_name:
+                        new_data = pd.DataFrame([[new_name, new_cat, new_ing]], columns=["料理名", "カテゴリー", "材料"])
+                        updated_menu = pd.concat([df_menu, new_data], ignore_index=True)
+                        save_to_github(updated_menu, FILE, f"Update {new_name}", menu_sha)
+                        st.success(f"{new_name} を保存しました")
                         st.rerun()
                     else:
-                        st.error("料理名を入力してください。")
+                        st.error("料理名を入力してください")

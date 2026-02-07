@@ -49,27 +49,14 @@ st.markdown("""
     }
 
     /* 列ごとの個別設定 */
-    /* 1列目: 日付 */
-    .history-container th:nth-child(1), .history-container td:nth-child(1) { 
-        width: 110px !important; 
-        text-align: center !important; 
-        white-space: nowrap !important; 
-    }
-    /* 2列目: 曜日 */
-    .history-container th:nth-child(2), .history-container td:nth-child(2) { 
-        width: 65px !important; 
-        text-align: center !important; 
-        white-space: nowrap !important; 
-    }
-    /* 3列目: 料理名 */
-    .history-container th:nth-child(3) { 
-        text-align: center !important; /* タイトルは中央揃え */
-    }
-    .history-container td:nth-child(3) { 
-        text-align: left !important;   /* 中身は左揃え */
-        white-space: normal !important; 
-        word-wrap: break-word !important; 
-    }
+    .history-container th:nth-child(1), .history-container td:nth-child(1) { width: 110px !important; text-align: center !important; white-space: nowrap !important; }
+    .history-container th:nth-child(2), .history-container td:nth-child(2) { width: 65px !important; text-align: center !important; white-space: nowrap !important; }
+    .history-container th:nth-child(3) { text-align: center !important; }
+    .history-container td:nth-child(3) { text-align: left !important; white-space: normal !important; word-wrap: break-word !important; }
+
+    /* 買い物リストのカードスタイル */
+    .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
+    .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -188,12 +175,13 @@ with t_hist:
         display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
         display_df = display_df.sort_values("日付", ascending=False)
         
-        # インデックスなしHTMLとして出力
         html_table = display_df[["日付", "曜日", "料理名"]].to_html(index=False, escape=False)
         st.markdown(f'<div class="history-container">{html_table}</div>', unsafe_allow_html=True)
 
 with t_manage:
-    edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
+    st.subheader("⚙️ メニュー管理")
+    edit_dish = st.selectbox("編集する料理を選んでください", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
+    
     if edit_dish != "選択してください":
         curr = df_menu[df_menu["料理名"] == edit_dish].iloc[0]
         with st.form("edit_f"):
@@ -203,6 +191,19 @@ with t_manage:
             if st.form_submit_button("保存"):
                 df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [n_n, n_c, n_m]
                 save_to_github(df_menu, FILE, f"Edit {edit_dish}", menu_sha)
+                st.rerun()
+
+    st.markdown("---")
+    with st.form("add_form"):
+        st.markdown("##### 新規メニューの追加")
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", cats)
+        m = st.text_area("材料")
+        if st.form_submit_button("新規保存"):
+            if n and m:
+                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
+                save_to_github(new_df, FILE, f"Add {n}", menu_sha)
+                st.cache_data.clear()
                 st.rerun()
 
 st.markdown(f'<div style="text-align:right; font-size:0.6rem; color:#ddd;">{VERSION}</div>', unsafe_allow_html=True)

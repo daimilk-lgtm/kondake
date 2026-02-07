@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.1.0"  # 163行目の構文エラーを修正
+VERSION = "1.1.1"  # 印刷プレビューが真っ白になる問題を修正
 
 import streamlit as st
 import pandas as pd
@@ -81,16 +81,17 @@ st.markdown("""
     .preview-table th { background: #fafafa; padding: 10px; border: 1px solid #eee; }
     .preview-table td { padding: 10px; border: 1px solid #eee; }
     
+    /* 印刷時の設定: 不要な要素を消す方式に変更 */
     @media print {
-        body * { visibility: hidden; }
-        .print-area, .print-area * { visibility: visible; }
-        .print-area { position: absolute; left: 0; top: 0; width: 100%; }
-        .no-print { display: none !important; }
+        header, footer, .stTabs, .main-title, .version-label, .no-print, [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stDecoration"] {
+            display: none !important;
+        }
+        .stApp { background: white !important; }
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title no-print">献だけ</h1>', unsafe_allow_html=True)
 
 df_menu, menu_sha = get_menu_data()
 df_dict = get_dict_data()
@@ -101,6 +102,8 @@ tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "�
 day_labels = ["日", "月", "火", "水", "木", "金", "土"]
 
 with tab_plan:
+    # 印刷時には隠すクラス no-print を追加
+    st.markdown('<div class="no-print">', unsafe_allow_html=True)
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
@@ -120,8 +123,10 @@ with tab_plan:
             weekly_plan[d_str] = {"menu": day_menu, "weekday": w_str}
 
     memo = st.text_area("メモ（買い物リストに追加したいものなど）", placeholder="例：卵、牛乳、洗剤...")
+    confirm_btn = st.button("確定して買い物リストを生成", type="primary", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
+    if confirm_btn:
         st.divider()
         new_history_entries = []
         all_ings_list = []
@@ -141,15 +146,17 @@ with tab_plan:
             s_dish = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
 
+        # 履歴保存ボタンは印刷しない
+        st.markdown('<div class="no-print">', unsafe_allow_html=True)
         if st.button("この内容で履歴を保存", type="secondary"):
             if new_history_entries:
                 if "曜日" not in df_hist.columns: df_hist["曜日"] = ""
                 new_hist_df = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
                 save_to_github(new_hist_df, HIST_FILE, "Update history", hist_sha)
                 st.success("履歴を保存しました")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="print-area">', unsafe_allow_html=True)
-        
+        # ここから下が印刷対象
         st.markdown("### 📋 今週の献立チェック")
         st.markdown(f'<table class="preview-table"><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table>', unsafe_allow_html=True)
 
@@ -158,7 +165,7 @@ with tab_plan:
             memo_items = memo.replace("、", ",").replace("\n", ",").split(",")
             for m_item in memo_items:
                 if m_item.strip():
-                    all_ings_list.append(f"{m_item.strip()} (メモ)") # ここを修正しました
+                    all_ings_list.append(f"{m_item.strip()} (メモ)")
 
         if all_ings_list:
             counts = pd.Series(all_ings_list).value_counts()
@@ -173,13 +180,14 @@ with tab_plan:
             df_res = pd.DataFrame(result_data).sort_values("cat")
             cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
             st.markdown(cards_html, unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
 
+        # 印刷ボタン自体も印刷しない
+        st.markdown('<div class="no-print">', unsafe_allow_html=True)
         components.html(
             """<button onclick="window.parent.print()" style="width: 100%; background-color: #262730; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 1rem; margin-top: 20px;">A4印刷する</button>""",
             height=80,
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 with tab_hist:
     st.subheader("過去の履歴")

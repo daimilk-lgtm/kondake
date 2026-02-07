@@ -61,9 +61,9 @@ st.markdown("""
         text-align: center !important; 
         white-space: nowrap !important; 
     }
-    /* 3列目: 料理名 */
+    /* 3列目: 料理名 (中央揃えに修正) */
     .history-container th:nth-child(3), .history-container td:nth-child(3) { 
-        text-align: left !important; 
+        text-align: center !important; 
         white-space: normal !important; 
         word-wrap: break-word !important; 
     }

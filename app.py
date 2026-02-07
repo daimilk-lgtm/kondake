@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import hashlib
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.4.4" 
+VERSION = "1.4.5" 
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -18,7 +18,7 @@ HIST_FILE = "history.csv"
 USER_FILE = "users.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 2. デザイン定義 (ノイズを完全に消し去る) ---
+# --- 2. デザイン定義 (サイドバーを正常化) ---
 st.set_page_config(page_title="献だけ", layout="centered")
 st.markdown("""
 <style>
@@ -47,10 +47,19 @@ st.markdown("""
     .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
     .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
 
-    /* アイコン化け・不要なテキスト漏れを強制非表示 */
-    [data-testid="stSidebarCollapseButton"] div { display: none !important; }
-    .st-emotion-cache-6q9sum.edgvb6w4::before { display: none !important; }
-    header { visibility: hidden !important; }
+    /* サイドバー周りの不具合修正 */
+    /* 1. 化けていたアイコンテキストを非表示 */
+    [data-testid="stSidebarCollapseButton"] span {
+        font-size: 0 !important;
+    }
+    /* 2. 代わりに標準の矢印（あるいは代用）を出す設定 */
+    [data-testid="stSidebarCollapseButton"]::after {
+        content: "〉";
+        font-size: 1.2rem;
+        color: #333;
+    }
+    /* 3. ヘッダーを透明にするが、ボタンは押せるようにする */
+    header { background-color: rgba(0,0,0,0) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -123,6 +132,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # --- 5. メインアプリ ---
+# サイドバーにログアウトボタンを設置
 with st.sidebar:
     st.write(f"Login: {st.session_state['username']}")
     if st.button("ログアウト", use_container_width=True):
@@ -144,13 +154,13 @@ cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 指定仕様: 日付はユーザーに入力させる
+    # 仕様遵守: 日付はユーザーに入力させる
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
     start_date = st.date_input("開始日（日）", value=default_sun)
     
-    # 指定仕様: 日曜スタート
+    # 仕様遵守: 日曜スタート
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])

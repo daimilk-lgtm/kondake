@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.1.2"  # 印刷機能を別タブ生成方式に変更（真っ白問題を確実に回避）
+VERSION = "1.1.3"  # 印刷用コードの露出修正 & 履歴の列順・None表示を改善
 
 import streamlit as st
 import pandas as pd
@@ -38,7 +38,10 @@ def get_history_data():
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
-            return pd.read_csv(io.StringIO(raw)), r.json()["sha"]
+            df_h = pd.read_csv(io.StringIO(raw))
+            # Noneを空文字に置換
+            df_h = df_h.fillna("")
+            return df_h, r.json()["sha"]
         else:
             return pd.DataFrame(columns=["日付", "曜日", "料理名"]), None
     except:
@@ -136,7 +139,6 @@ with tab_plan:
 
         if st.button("この内容で履歴を保存", type="secondary"):
             if new_history_entries:
-                if "曜日" not in df_hist.columns: df_hist["曜日"] = ""
                 new_hist_df = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
                 save_to_github(new_hist_df, HIST_FILE, "Update history", hist_sha)
                 st.success("履歴を保存しました")
@@ -164,32 +166,45 @@ with tab_plan:
             cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
             st.markdown(cards_html, unsafe_allow_html=True)
 
-            # 印刷用HTMLの組み立て
-            print_html = f"""
+            # --- 印刷用HTMLの組み立て ---
+            print_html_content = f"""
             <html><head><style>
-                body {{ font-family: sans-serif; padding: 20px; }}
+                body {{ font-family: sans-serif; padding: 20px; color: #333; }}
                 table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
-                th, td {{ border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 12px; }}
-                .card {{ border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 8px; }}
-                .cat {{ font-size: 10px; color: #666; }}
+                th, td {{ border: 1px solid #eee; padding: 10px; text-align: left; font-size: 13px; }}
+                th {{ background: #fafafa; }}
+                .shopping-card {{ border: 1px solid #f0f0f0; padding: 15px; margin-bottom: 10px; border-radius: 12px; }}
+                .category-label {{ font-size: 11px; color: #999; margin-bottom: 5px; }}
+                .item-row {{ font-size: 14px; padding: 4px 0; border-bottom: 1px solid #f9f9f9; }}
             </style></head><body>
-                <h2>今週の献立</h2>
+                <h2>🗓 今週の献立</h2>
                 <table><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table>
-                <h2>買い物リスト</h2>
+                <h2>🛒 買い物リスト</h2>
                 {cards_html}
                 <script>window.onload = function() {{ window.print(); }}</script>
             </body></html>
-            """.replace("'", "\\'")
+            """.replace("\n", "").replace("'", "\\'")
 
+            # ボタンのみを表示し、中身はJavaScriptの変数として保持
             components.html(
-                f"""<button onclick="var w=window.open(); w.document.write('{print_html}'); w.document.close();" style="width: 100%; background-color: #262730; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 1rem; margin-top: 20px;">A4印刷する</button>""",
-                height=80,
+                f"""
+                <script>
+                function doPrint() {{
+                    var w = window.open();
+                    w.document.write('{print_html_content}');
+                    w.document.close();
+                }}
+                </script>
+                <button onclick="doPrint()" style="width: 100%; background-color: #262730; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 1rem; margin-top: 10px;">A4印刷する</button>
+                """,
+                height=70,
             )
 
 with tab_hist:
     st.subheader("過去の履歴")
     if not df_hist.empty:
-        display_hist = df_hist.sort_values("日付", ascending=False)
+        # Noneを空文字にして、指定の順序（日付、曜日、料理名）に
+        display_hist = df_hist.fillna("").sort_values("日付", ascending=False)
         display_hist = display_hist[["日付", "曜日", "料理名"]]
         st.dataframe(display_hist, use_container_width=True, hide_index=True,
             column_config={

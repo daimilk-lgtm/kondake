@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.0.8"  # メモスペースと材料表示を復元、印刷ボタン修正
+VERSION = "1.0.9"  # 印刷ボタンを最下部へ移動 & 印刷範囲を献立とリストに限定
 
 import streamlit as st
 import pandas as pd
@@ -80,9 +80,13 @@ st.markdown("""
     .preview-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 20px; border-radius: 12px; overflow: hidden; border: 1px solid #eee; }
     .preview-table th { background: #fafafa; padding: 10px; border: 1px solid #eee; }
     .preview-table td { padding: 10px; border: 1px solid #eee; }
+    
+    /* 印刷設定: 指定したクラス以外をすべて隠す */
     @media print {
+        body * { visibility: hidden; }
+        .print-area, .print-area * { visibility: visible; }
+        .print-area { position: absolute; left: 0; top: 0; width: 100%; }
         .no-print { display: none !important; }
-        .stTabs [data-baseweb="tab-list"] { display: none !important; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -127,12 +131,9 @@ with tab_plan:
         for d_str, data in weekly_plan.items():
             v = data["menu"]
             w_str = data["weekday"]
-            day_items = []
             for dish in v.values():
                 if dish != "なし":
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
-                    day_items.append(dish)
-                    # 材料の取得
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     items = str(ing_raw).replace("、", ",").split(",")
                     all_ings_list.extend([x.strip() for x in items if x.strip()])
@@ -149,61 +150,14 @@ with tab_plan:
                 save_to_github(new_hist_df, HIST_FILE, "Update history", hist_sha)
                 st.success("履歴を保存しました")
 
+        # 印刷用コンテナ開始
+        st.markdown('<div class="print-area">', unsafe_allow_html=True)
+        
         st.markdown("### 📋 今週の献立チェック")
         st.markdown(f'<table class="preview-table"><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table>', unsafe_allow_html=True)
-        
-        # 印刷ボタン
-        components.html(
-            """<button onclick="window.parent.print()" style="width: 100%; background-color: #262730; color: white; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif;">A4印刷する</button>""",
-            height=60,
-        )
 
         st.markdown("### 🛒 買い物リスト")
-        # メモをリストに追加
         if memo:
             memo_items = memo.replace("、", ",").replace("\n", ",").split(",")
             for m_item in memo_items:
-                if m_item.strip(): all_ings_list.append(f"{m_item.strip()} (メモ)")
-
-        if all_ings_list:
-            counts = pd.Series(all_ings_list).value_counts()
-            result_data = []
-            for item, count in counts.items():
-                category = "99未分類"
-                if df_dict is not None:
-                    for _, row in df_dict.iterrows():
-                        if row["材料"] in item: category = row["種別"]; break
-                result_data.append({"name": f"{item} × {count}" if count > 1 else item, "cat": category})
-            
-            df_res = pd.DataFrame(result_data).sort_values("cat")
-            cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
-            st.markdown(cards_html, unsafe_allow_html=True)
-
-with tab_hist:
-    st.subheader("過去の履歴")
-    if not df_hist.empty:
-        display_hist = df_hist.sort_values("日付", ascending=False)
-        display_hist = display_hist[["日付", "曜日", "料理名"]]
-        st.dataframe(display_hist, use_container_width=True, hide_index=True,
-            column_config={
-                "日付": st.column_config.TextColumn("日付", width="small"),
-                "曜日": st.column_config.TextColumn("曜日", width="small"),
-                "料理名": st.column_config.TextColumn("料理名", width="large"),
-            })
-    else:
-        st.info("まだ履歴はありません。")
-
-with tab_manage:
-    st.subheader("⚙️ メニュー管理")
-    with st.form("add", clear_on_submit=True):
-        n = st.text_input("料理名")
-        c = st.selectbox("カテゴリー", cats)
-        m = st.text_area("材料（「、」区切り）")
-        if st.form_submit_button("保存"):
-            if n and m:
-                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
-                if save_to_github(new_df, FILE, f"Add {n}", menu_sha) == 200:
-                    st.cache_data.clear()
-                    st.rerun()
-    st.dataframe(df_menu, use_container_width=True)
-    st.markdown(f'<div class="version-label">Version {VERSION}</div>', unsafe_allow_html=True)
+                if m_item.strip(): all_ings_list.append(f"{m_item.strip()} (メモ

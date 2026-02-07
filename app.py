@@ -118,4 +118,24 @@ with t_plan:
         for i, tab in enumerate(d_tabs):
             with tab:
                 st.markdown(f"##### {(start_date + timedelta(days=i)).strftime('%Y/%m/%d')} ({day_labels[i]})")
-                for
+                for c in ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]:
+                    opts = ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist()
+                    st.selectbox(c, opts, key=f"s_{i}_{c}")
+        st.button("確定して買い物リストを生成", type="primary", use_container_width=True)
+
+with t_manage:
+    st.subheader("メニューの管理")
+    if not df_menu.empty:
+        # 公開バージョン仕様：直接編集
+        edited_df = st.data_editor(
+            df_menu,
+            column_order=["料理名", "カテゴリー", "材料"],
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="v_final_editor"
+        )
+        if st.button("GitHubへ保存", type="primary", use_container_width=True):
+            save_to_github(edited_df, FILE, "Update from App", menu_sha)
+            st.success("保存しました")
+            st.rerun()

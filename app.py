@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.3.0"  # ログイン機能追加版
+VERSION = "1.3.2" 
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -15,30 +15,41 @@ FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
 HIST_FILE = "history.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
-APP_PASSWORD = st.secrets.get("APP_PASSWORD", "1234")  # Secretsに設定するかデフォルトを使用
+APP_PASSWORD = st.secrets.get("APP_PASSWORD", "1234")
 
-# --- ログインチェック ---
-def check_password():
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
+# --- 2. デザイン定義 (絶対にここを変えない) ---
+st.set_page_config(page_title="献だけ", layout="centered")
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
+    html, body, [class*="css"], p, div, select, input, label, span {
+        font-family: 'Noto Sans JP', sans-serif !important;
+        font-weight: 300 !important;
+    }
+    .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
+    .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
+    .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
+    .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
+</style>
+""", unsafe_allow_html=True)
 
-    if not st.session_state["authenticated"]:
-        st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
-        pwd = st.text_input("パスワードを入力してください", type="password")
-        if st.button("ログイン"):
-            if pwd == APP_PASSWORD:
-                st.session_state["authenticated"] = True
-                st.rerun()
-            else:
-                st.error("パスワードが違います")
-        return False
-    return True
+# --- ログイン機能 (仕様を守るためのガード) ---
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
 
-# ログインしていない場合はここで止める
-if not check_password():
+if not st.session_state["authenticated"]:
+    st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+    pwd = st.text_input("パスワードを入力してください", type="password")
+    if st.button("ログイン", use_container_width=True):
+        if pwd == APP_PASSWORD:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("パスワードが違います")
     st.stop()
 
-# --- 2. データ取得・保存関数 (変更なし) ---
+# --- 以降、元の仕様を一切変えずに実行 ---
+
 @st.cache_data(ttl=60)
 def get_menu_data():
     try:
@@ -82,22 +93,6 @@ def save_to_github(df, filename, message, current_sha=None):
     res = requests.put(url, headers=headers, json=data)
     return res.status_code
 
-# --- 3. デザイン定義 (変更なし) ---
-st.set_page_config(page_title="献だけ", layout="centered")
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
-    html, body, [class*="css"], p, div, select, input, label, span {
-        font-family: 'Noto Sans JP', sans-serif !important;
-        font-weight: 300 !important;
-    }
-    .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
-    .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
-    .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
-    .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
-</style>
-""", unsafe_allow_html=True)
-
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
 df_menu, menu_sha = get_menu_data()
@@ -112,12 +107,14 @@ cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 指定通りの日付入力と日曜スタート設定
+    # ユーザーに入力させる日付指定
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
-    start_date = st.date_input("開始日（日）", value=default_sun)  # 日付はユーザーに入力させる
-    day_labels = ["日", "月", "火", "水", "木", "金", "土"]  # 日曜スタートにする
+    start_date = st.date_input("開始日（日）", value=default_sun)
+    
+    # 日曜スタート
+    day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
     weekly_plan = {}
@@ -181,7 +178,6 @@ with tab_plan:
                 }};
                 </script>""", height=80)
 
-# --- 履歴・管理タブは以前のロジックのまま維持 ---
 with tab_hist:
     st.subheader("過去の履歴")
     if not df_hist.empty:

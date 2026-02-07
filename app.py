@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import hashlib
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.4.5" 
+VERSION = "1.4.6" 
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -18,8 +18,8 @@ HIST_FILE = "history.csv"
 USER_FILE = "users.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 2. デザイン定義 (サイドバーを正常化) ---
-st.set_page_config(page_title="献だけ", layout="centered")
+# --- 2. デザイン定義 (サイドバーとヘッダーを完全に葬り去る) ---
+st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
@@ -37,6 +37,16 @@ st.markdown("""
         letter-spacing: 0.5rem; 
     }
 
+    /* 左上の変な文字が出る原因の要素を完全に消去 */
+    header[data-testid="stHeader"], 
+    section[data-testid="stSidebar"], 
+    button[data-testid="stSidebarCollapseButton"] {
+        display: none !important;
+    }
+    
+    /* コンテンツの余白調整 */
+    .block-container { padding-top: 1rem !important; }
+
     .shopping-card { 
         background: white; 
         padding: 15px; 
@@ -46,20 +56,6 @@ st.markdown("""
     }
     .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
     .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
-
-    /* サイドバー周りの不具合修正 */
-    /* 1. 化けていたアイコンテキストを非表示 */
-    [data-testid="stSidebarCollapseButton"] span {
-        font-size: 0 !important;
-    }
-    /* 2. 代わりに標準の矢印（あるいは代用）を出す設定 */
-    [data-testid="stSidebarCollapseButton"]::after {
-        content: "〉";
-        font-size: 1.2rem;
-        color: #333;
-    }
-    /* 3. ヘッダーを透明にするが、ボタンは押せるようにする */
-    header { background-color: rgba(0,0,0,0) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -114,7 +110,7 @@ if not st.session_state["authenticated"]:
                         st.session_state["authenticated"] = True
                         st.session_state["username"] = u_login
                         st.rerun()
-                st.error("ユーザー名またはパスワードが違います")
+                st.error("ログイン失敗")
 
     with auth_tab2:
         with st.form("reg_form"):
@@ -123,21 +119,20 @@ if not st.session_state["authenticated"]:
             if st.form_submit_button("登録実行", use_container_width=True):
                 if u_reg and p_reg:
                     if u_reg in df_users["username"].values:
-                        st.warning("そのユーザー名は既に使用されています")
+                        st.warning("使用済み")
                     else:
                         new_user = pd.DataFrame([[u_reg, make_hash(p_reg)]], columns=["username", "password"])
                         updated_users = pd.concat([df_users, new_user], ignore_index=True)
                         save_to_github(updated_users, USER_FILE, f"Add {u_reg}", user_sha)
-                        st.success("登録完了！ログインしてください")
+                        st.success("登録完了")
     st.stop()
 
 # --- 5. メインアプリ ---
-# サイドバーにログアウトボタンを設置
-with st.sidebar:
-    st.write(f"Login: {st.session_state['username']}")
-    if st.button("ログアウト", use_container_width=True):
+# ログアウトボタンを右上に配置（サイドバーを廃止したため）
+col_title, col_logout = st.columns([0.8, 0.2])
+with col_logout:
+    if st.button("ログアウト", key="logout_btn"):
         st.session_state["authenticated"] = False
-        st.session_state["username"] = None
         st.rerun()
 
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
@@ -147,22 +142,21 @@ df_dict, _ = get_github_file(DICT_FILE)
 df_hist, hist_sha = get_github_file(HIST_FILE)
 
 if df_menu is None:
-    st.error("データの読み込みに失敗しました。")
+    st.error("データエラー")
     st.stop()
 
 cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
 with tab_plan:
-    # 仕様遵守: 日付はユーザーに入力させる
+    # 指定仕様: 日付はユーザーに入力させる
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
     start_date = st.date_input("開始日（日）", value=default_sun)
     
-    # 仕様遵守: 日曜スタート
+    # 指定仕様: 日曜スタート
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
-    
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
     weekly_plan = {}
     for i, day_tab in enumerate(days_tabs):
@@ -224,6 +218,7 @@ with tab_plan:
                 }};
                 </script>""", height=80)
 
+# 履歴・管理タブは従来通り
 with tab_hist:
     st.subheader("過去の履歴")
     if df_hist is not None and not df_hist.empty:
@@ -231,29 +226,13 @@ with tab_hist:
 
 with tab_manage:
     st.subheader("⚙️ メニュー管理")
-    edit_dish = st.selectbox("編集する料理を選んでください", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
+    edit_dish = st.selectbox("編集する料理", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
     if edit_dish != "選択してください":
         current_data = df_menu[df_menu["料理名"] == edit_dish].iloc[0]
         with st.form("edit_form"):
             new_n = st.text_input("料理名", value=current_data["料理名"])
-            c_val = current_data["カテゴリー"]
-            new_c = st.selectbox("カテゴリー", cats, index=cats.index(c_val) if c_val in cats else 0)
             new_m = st.text_area("材料", value=current_data["材料"])
-            if st.form_submit_button("変更を保存"):
-                df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [new_n, new_c, new_m]
+            if st.form_submit_button("保存"):
+                df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "材料"]] = [new_n, new_m]
                 save_to_github(df_menu, FILE, f"Update {edit_dish}", menu_sha)
-                st.cache_data.clear()
-                st.rerun()
-
-    st.divider()
-    with st.form("add_form"):
-        st.markdown("##### 新規メニューの追加")
-        n = st.text_input("料理名")
-        c = st.selectbox("カテゴリー", cats)
-        m = st.text_area("材料")
-        if st.form_submit_button("新規保存"):
-            if n and m:
-                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
-                save_to_github(new_df, FILE, f"Add {n}", menu_sha)
-                st.cache_data.clear()
                 st.rerun()

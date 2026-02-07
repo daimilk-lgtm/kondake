@@ -61,9 +61,12 @@ st.markdown("""
         text-align: center !important; 
         white-space: nowrap !important; 
     }
-    /* 3列目: 料理名 (中央揃えに修正) */
-    .history-container th:nth-child(3), .history-container td:nth-child(3) { 
-        text-align: center !important; 
+    /* 3列目: 料理名 */
+    .history-container th:nth-child(3) { 
+        text-align: center !important; /* タイトルは中央揃え */
+    }
+    .history-container td:nth-child(3) { 
+        text-align: left !important;   /* 中身は左揃え */
         white-space: normal !important; 
         word-wrap: break-word !important; 
     }
@@ -179,27 +182,4 @@ with t_plan:
 with t_hist:
     if not df_hist.empty:
         group_cols = ["日付", "曜日"]
-        if "uid" in df_hist.columns:
-            group_cols.append("uid")
-        
-        display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
-        display_df = display_df.sort_values("日付", ascending=False)
-        
-        # インデックスなしHTMLとして出力
-        html_table = display_df[["日付", "曜日", "料理名"]].to_html(index=False, escape=False)
-        st.markdown(f'<div class="history-container">{html_table}</div>', unsafe_allow_html=True)
-
-with t_manage:
-    edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
-    if edit_dish != "選択してください":
-        curr = df_menu[df_menu["料理名"] == edit_dish].iloc[0]
-        with st.form("edit_f"):
-            n_n = st.text_input("料理名", value=curr["料理名"])
-            n_c = st.selectbox("カテゴリー", cats, index=cats.index(curr["カテゴリー"]))
-            n_m = st.text_area("材料", value=curr["材料"])
-            if st.form_submit_button("保存"):
-                df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [n_n, n_c, n_m]
-                save_to_github(df_menu, FILE, f"Edit {edit_dish}", menu_sha)
-                st.rerun()
-
-st.markdown(f'<div style="text-align:right; font-size:0.6rem; color:#ddd;">{VERSION}</div>', unsafe_allow_html=True)
+        if "uid"

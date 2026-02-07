@@ -17,7 +17,7 @@ def validate_system_integrity():
     return check_results
 
 # --- 1. 設定 ---
-VERSION = "test-v1.0.8"
+VERSION = "test-v1.0.9"
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
@@ -85,7 +85,7 @@ with t_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v108_{i}_{c}") for c in cats}
+            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v109_{i}_{c}") for c in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
     memo = st.text_area("メモ")
@@ -93,11 +93,12 @@ with t_plan:
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings = []
         new_entries = []
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S") # 同時更新を識別用
         
         for d_str, data in weekly_plan.items():
             for c_type, dish in data["menu"].items():
                 if dish != "なし":
-                    new_entries.append({"日付": d_str, "曜日": data["weekday"], "カテゴリー": c_type, "料理名": dish})
+                    new_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": dish, "uid": timestamp})
                     row = df_menu[df_menu["料理名"] == dish]
                     if not row.empty:
                         items = re.split(r'[,、\n]', str(row.iloc[0]["材料"]))
@@ -121,7 +122,6 @@ with t_plan:
                 cards_html += f'<div class="shopping-card"><div class="category-label">{cat}</div>{items_html}</div>'
             st.markdown(cards_html, unsafe_allow_html=True)
             
-            # --- 修正箇所: エスケープ処理 ---
             b64_print = base64.b64encode(f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🛒 買い物リスト</h2>{cards_html}</body></html>".encode()).decode()
             components.html(f"""
                 <button id="p" style="width:100%; height:45px; background:#262730; color:white; border:none; border-radius:8px; cursor:pointer;">A4印刷</button>
@@ -144,7 +144,26 @@ with t_plan:
 
 with t_hist:
     if not df_hist.empty:
-        st.dataframe(df_hist.sort_values(["日付", "カテゴリー"], ascending=[False, True]), use_container_width=True, hide_index=True)
+        # 料理名を日付・更新タイミング(uid)ごとに結合
+        # uidがない旧データへの配慮を含めた集計
+        group_cols = ["日付", "曜日"]
+        if "uid" in df_hist.columns:
+            group_cols.append("uid")
+        
+        display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
+        display_df = display_df.sort_values("日付", ascending=False)
+        
+        # 列幅の調整設定
+        st.dataframe(
+            display_df[["日付", "曜日", "料理名"]],
+            column_config={
+                "日付": st.column_config.TextColumn("日付", width="small"),
+                "曜日": st.column_config.TextColumn("曜日", width="small"),
+                "料理名": st.column_config.TextColumn("料理名", width="large"),
+            },
+            use_container_width=True,
+            hide_index=True
+        )
 
 with t_manage:
     edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))

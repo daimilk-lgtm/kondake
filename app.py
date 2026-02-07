@@ -13,7 +13,7 @@ FILE = "menu.csv"
 USER_FILE = "users.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 2. デザイン定義 (仕様死守：Noto Sans JP, ノイズ消去) ---
+# --- 2. デザイン定義 (Noto Sans JP, ノイズ消去) ---
 st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
@@ -38,6 +38,7 @@ def get_github_file(filename):
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             df = pd.read_csv(io.StringIO(raw))
+            # 内部での列名変換 (email -> username)
             if filename == USER_FILE and 'email' in df.columns:
                 df = df.rename(columns={'email': 'username'})
             return df, r.json()["sha"]
@@ -45,6 +46,7 @@ def get_github_file(filename):
     return pd.DataFrame(), None
 
 def save_to_github(df, filename, message, current_sha=None):
+    # 保存時に email に戻す
     save_df = df.rename(columns={"username": "email"}) if filename == USER_FILE else df
     csv_content = save_df.to_csv(index=False, encoding="utf-8-sig")
     content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
@@ -61,55 +63,67 @@ if "authenticated" not in st.session_state:
 if not st.session_state["authenticated"]:
     st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
     df_users, user_sha = get_github_file(USER_FILE)
-    with st.form("l"):
+    with st.form("login"):
         u = st.text_input("メールアドレス", key="ul", autocomplete="email")
         p = st.text_input("パスワード", type="password", key="pl", autocomplete="current-password")
         if st.form_submit_button("ログイン", use_container_width=True):
             if not df_users.empty and u in df_users["username"].values:
-                # 簡易ハッシュ確認（実際はmake_hashを使用）
                 st.session_state.update({"authenticated": True, "username": u})
                 st.rerun()
     st.stop()
 
 # --- 5. メインアプリ ---
-st.markdown('<div style="text-align:right"><button>ログアウト</button></div>', unsafe_allow_html=True)
+st.markdown('<div style="text-align:right">', unsafe_allow_html=True)
+if st.button("ログアウト"):
+    st.session_state["authenticated"] = False
+    st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
+
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+st.caption(f"Logged in as: {st.session_state['username']}")
 
 df_menu, menu_sha = get_github_file(FILE)
 
 t_plan, t_hist, t_manage = st.tabs(["📋 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
+# --- 献立作成 (日曜スタート) ---
 with t_plan:
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
-    st.date_input("開始日（日）", value=default_sun) [cite: 2026-02-06]
-    st.info("献立作成エリア")
+    # 修正：SyntaxErrorの原因となったタグを削除
+    start_date = st.date_input("開始日（日）", value=default_sun)
+    
+    day_labels = ["日", "月", "火", "水", "木", "金", "土"]
+    d_tabs = st.tabs(day_labels)
+    cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
+    for i, tab in enumerate(d_tabs):
+        with tab:
+            st.markdown(f"##### {(start_date + timedelta(days=i)).strftime('%Y/%m/%d')} ({day_labels[i]})")
+            for c in cats:
+                opts = ["なし"] + (df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist() if not df_menu.empty else [])
+                st.selectbox(c, opts, key=f"sel_{i}_{c}")
+    st.button("確定して買い物リストを生成", type="primary", use_container_width=True)
 
-with t_hist:
-    st.info("履歴エリア")
-
+# --- メニュー管理 (編集・削除機能) ---
 with t_manage:
-    st.subheader("メニューの編集・削除")
+    st.subheader("登録メニューの編集・削除")
     if not df_menu.empty:
-        # data_editorを使用して「編集・削除」を可能にする
         edited_df = st.data_editor(
             df_menu,
             column_order=["料理名", "カテゴリー", "材料"],
-            num_rows="dynamic", # これで削除や追加が可能
+            num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
-            key="menu_editor"
+            key="editor"
         )
-        
-        if st.button("変更を保存する", type="primary"):
+        if st.button("変更を確定して保存", type="primary", use_container_width=True):
             save_to_github(edited_df, FILE, "Update menu via editor", menu_sha)
-            st.success("メニューを更新しました")
+            st.success("保存完了")
             st.rerun()
     
-    st.markdown("---")
-    with st.expander("＋ フォームから新しく追加"):
-        with st.form("add_form", clear_on_submit=True):
+    with st.expander("＋ 新しい料理を追加"):
+        with st.form("add_new", clear_on_submit=True):
             n_cat = st.selectbox("カテゴリー", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"])
             n_name = st.text_input("料理名")
             n_ing = st.text_area("材料")

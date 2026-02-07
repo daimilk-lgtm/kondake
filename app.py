@@ -17,7 +17,7 @@ def validate_system_integrity():
     return check_results
 
 # --- 1. 設定 ---
-VERSION = "test-v1.1.4"
+VERSION = "test-v1.1.5"
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
@@ -25,26 +25,48 @@ HIST_FILE = "history.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
 st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
+
+# CSSの徹底強化
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
     html, body, [class*="css"], p, div, select, input, label, span { font-family: 'Noto Sans JP', sans-serif !important; font-weight: 300 !important; }
     .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
     header[data-testid="stHeader"] { background: transparent !important; color: transparent !important; }
-    .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; color: #333; }
-    .category-label { font-size: 0.8rem; color: #999; border-bottom: 1px solid #f9f9f9; margin-bottom: 5px; }
     
-    /* 履歴テーブル用スタイル調整 */
-    .history-container table { width: 100% !important; border-collapse: collapse; }
-    .history-container td, .history-container th { border: 1px solid #eee; padding: 10px 8px; text-align: left; }
-    /* 見出しを中央揃えにする */
-    .history-container th { text-align: center !important; font-weight: 400 !important; background-color: #fcfcfc; }
-    /* 日付(1列目)の折り返し禁止 */
-    .history-container td:nth-child(1), .history-container th:nth-child(1) { white-space: nowrap !important; width: 105px !important; text-align: center; }
-    /* 曜日(2列目)の折り返し禁止と幅をわずかに拡張 */
-    .history-container td:nth-child(2), .history-container th:nth-child(2) { white-space: nowrap !important; width: 55px !important; text-align: center; }
-    /* 料理名(3列目)の折り返し */
-    .history-container td:nth-child(3) { white-space: normal !important; word-wrap: break-word !important; }
+    /* 履歴テーブルの強制上書き */
+    .history-container table { width: 100% !important; border-collapse: collapse !important; table-layout: fixed !important; }
+    .history-container th { 
+        text-align: center !important; 
+        vertical-align: middle !important;
+        background-color: #f8f9fa !important;
+        padding: 12px 5px !important;
+        font-weight: 400 !important;
+    }
+    .history-container td { 
+        padding: 10px 8px !important; 
+        border-bottom: 1px solid #eee !important;
+    }
+
+    /* 列ごとの個別設定 */
+    /* 1列目: 日付 */
+    .history-container th:nth-child(1), .history-container td:nth-child(1) { 
+        width: 110px !important; 
+        text-align: center !important; 
+        white-space: nowrap !important; 
+    }
+    /* 2列目: 曜日 */
+    .history-container th:nth-child(2), .history-container td:nth-child(2) { 
+        width: 65px !important; 
+        text-align: center !important; 
+        white-space: nowrap !important; 
+    }
+    /* 3列目: 料理名 */
+    .history-container th:nth-child(3), .history-container td:nth-child(3) { 
+        text-align: left !important; 
+        white-space: normal !important; 
+        word-wrap: break-word !important; 
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,7 +119,7 @@ with t_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v114_{i}_{c}") for c in cats}
+            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v115_{i}_{c}") for c in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
     memo = st.text_area("メモ")
@@ -163,9 +185,9 @@ with t_hist:
         display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
         display_df = display_df.sort_values("日付", ascending=False)
         
-        st.markdown('<div class="history-container">', unsafe_allow_html=True)
-        st.write(display_df[["日付", "曜日", "料理名"]].to_html(index=False, escape=False), unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        # インデックスなしHTMLとして出力
+        html_table = display_df[["日付", "曜日", "料理名"]].to_html(index=False, escape=False)
+        st.markdown(f'<div class="history-container">{html_table}</div>', unsafe_allow_html=True)
 
 with t_manage:
     edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))

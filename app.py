@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.0.9"  # 印刷ボタンを最下部へ移動 & 印刷範囲を献立とリストに限定
+VERSION = "1.1.0"  # 163行目の構文エラーを修正
 
 import streamlit as st
 import pandas as pd
@@ -81,7 +81,6 @@ st.markdown("""
     .preview-table th { background: #fafafa; padding: 10px; border: 1px solid #eee; }
     .preview-table td { padding: 10px; border: 1px solid #eee; }
     
-    /* 印刷設定: 指定したクラス以外をすべて隠す */
     @media print {
         body * { visibility: hidden; }
         .print-area, .print-area * { visibility: visible; }
@@ -142,7 +141,6 @@ with tab_plan:
             s_dish = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
 
-        # 履歴保存ボタン
         if st.button("この内容で履歴を保存", type="secondary"):
             if new_history_entries:
                 if "曜日" not in df_hist.columns: df_hist["曜日"] = ""
@@ -150,7 +148,6 @@ with tab_plan:
                 save_to_github(new_hist_df, HIST_FILE, "Update history", hist_sha)
                 st.success("履歴を保存しました")
 
-        # 印刷用コンテナ開始
         st.markdown('<div class="print-area">', unsafe_allow_html=True)
         
         st.markdown("### 📋 今週の献立チェック")
@@ -160,4 +157,55 @@ with tab_plan:
         if memo:
             memo_items = memo.replace("、", ",").replace("\n", ",").split(",")
             for m_item in memo_items:
-                if m_item.strip(): all_ings_list.append(f"{m_item.strip()} (メモ
+                if m_item.strip():
+                    all_ings_list.append(f"{m_item.strip()} (メモ)") # ここを修正しました
+
+        if all_ings_list:
+            counts = pd.Series(all_ings_list).value_counts()
+            result_data = []
+            for item, count in counts.items():
+                category = "99未分類"
+                if df_dict is not None:
+                    for _, row in df_dict.iterrows():
+                        if row["材料"] in item: category = row["種別"]; break
+                result_data.append({"name": f"{item} × {count}" if count > 1 else item, "cat": category})
+            
+            df_res = pd.DataFrame(result_data).sort_values("cat")
+            cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
+            st.markdown(cards_html, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        components.html(
+            """<button onclick="window.parent.print()" style="width: 100%; background-color: #262730; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 1rem; margin-top: 20px;">A4印刷する</button>""",
+            height=80,
+        )
+
+with tab_hist:
+    st.subheader("過去の履歴")
+    if not df_hist.empty:
+        display_hist = df_hist.sort_values("日付", ascending=False)
+        display_hist = display_hist[["日付", "曜日", "料理名"]]
+        st.dataframe(display_hist, use_container_width=True, hide_index=True,
+            column_config={
+                "日付": st.column_config.TextColumn("日付", width="small"),
+                "曜日": st.column_config.TextColumn("曜日", width="small"),
+                "料理名": st.column_config.TextColumn("料理名", width="large"),
+            })
+    else:
+        st.info("まだ履歴はありません。")
+
+with tab_manage:
+    st.subheader("⚙️ メニュー管理")
+    with st.form("add", clear_on_submit=True):
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", cats)
+        m = st.text_area("材料（「、」区切り）")
+        if st.form_submit_button("保存"):
+            if n and m:
+                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
+                if save_to_github(new_df, FILE, f"Add {n}", menu_sha) == 200:
+                    st.cache_data.clear()
+                    st.rerun()
+    st.dataframe(df_menu, use_container_width=True)
+    st.markdown(f'<div class="version-label">Version {VERSION}</div>', unsafe_allow_html=True)

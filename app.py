@@ -3,14 +3,20 @@ import pandas as pd
 import requests
 import base64
 import io
+import streamlit.components.v1 as components
+from datetime import datetime, timedelta
 
-# --- 0. 設定 ---
+# --- 0. 基本情報・設定 ---
+VERSION = "1.3.2"
 REPO = "daimilk-lgtm/kondake"
 USER_FILE = "users.csv"
+MENU_FILE = "menu.csv"
+HIST_FILE = "history.csv"
+DICT_FILE = "ingredients.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 1. 読み込み関数 (自動判別・ズレ防止版) ---
-def get_github_data(filename):
+# --- 1. GitHub連携関数 ---
+def get_github_data(filename, is_user=False):
     try:
         url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
         headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
@@ -19,58 +25,48 @@ def get_github_data(filename):
             content_data = r.json()
             raw = base64.b64decode(content_data["content"]).decode("utf-8-sig")
             
-            # 【対策1】区切り文字（タブ、カンマ、スペース）を自動判別
-            # engine='python' を使うことで、曖昧な区切りにも対応します
-            df = pd.read_csv(io.StringIO(raw), sep=r'\s+|,', engine='python')
+            # ユーザーファイルの場合は「空白区切り」かつ「全て文字列」として読み込む
+            if is_user:
+                df = pd.read_csv(io.StringIO(raw), sep=r'\s+', engine='python', dtype=str)
+            else:
+                df = pd.read_csv(io.StringIO(raw))
             
-            # 【対策2】列名の前後に空白があれば削除
             df.columns = [c.strip() for c in df.columns]
             return df, content_data["sha"]
-    except Exception as e:
-        st.error(f"データ取得エラー: {e}")
+    except: pass
     return pd.DataFrame(), None
 
-# --- 2. ログインUI ---
-def login_ui():
-    st.title("ログイン")
-    
-    df_users, _ = get_github_data(USER_FILE)
-    
-    with st.expander("登録状況の確認（ここが正しく並んでいればOK）"):
-        st.write(df_users)
+def save_to_github(df, filename, message, current_sha=None, is_user=False):
+    # ユーザーファイルはタブ区切り、それ以外はカンマ区切り
+    sep = "\t" if is_user else ","
+    csv_content = df.to_csv(index=False, encoding="utf-8-sig", sep=sep)
+    content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
+    url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
+    headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    data = {"message": message, "content": content_b64}
+    if current_sha: data["sha"] = current_sha
+    res = requests.put(url, headers=headers, json=data)
+    return res.status_code
 
-    l_email = st.text_input("メールアドレス")
-    # パスワードは 0 から始まる可能性があるので、数値ではなく文字列として扱います
-    l_pw = st.text_input("パスワード", type="password")
-    
-    if st.button("ログイン", type="primary", use_container_width=True):
-        if not df_users.empty:
-            # 【対策3】全データを文字列に変換し、前後の空白を徹底的に消す
-            df_users = df_users.astype(str).apply(lambda x: x.str.strip())
-            
-            # 入力値と比較
-            match = df_users[(df_users["email"] == l_email.strip()) & 
-                             (df_users["password"] == l_pw.strip())]
-            
-            if not match.empty:
-                st.session_state.logged_in = True
-                st.session_state.u_email = l_email.strip()
-                st.session_state.u_plan = match.iloc[0].get("plan", "free")
-                st.rerun()
-            else:
-                st.error("不一致です。上の『登録状況の確認』で、パスワードが password 列に正しく入っているか確認してください。")
-        else:
-            st.error("ユーザーデータが読み込めません。")
-
-# 制御ロジック
+# --- 2. 認証ロジック ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
-if not st.session_state.logged_in:
-    login_ui()
-else:
-    st.balloons()
-    st.success(f"ログイン成功！ {st.session_state.u_email} さん")
-    if st.button("ログアウト"):
-        st.session_state.logged_in = False
-        st.rerun()
+def login_ui():
+    st.markdown('<h1 style="text-align:center; font-weight:100;">献だけ</h1>', unsafe_allow_html=True)
+    tab_login, tab_signup = st.tabs(["ログイン", "新規登録"])
+    
+    df_users, user_sha = get_github_data(USER_FILE, is_user=True)
+
+    with tab_signup:
+        st.subheader("アカウント作成")
+        new_email = st.text_input("メールアドレス", key="reg_email")
+        new_pw = st.text_input("パスワード", type="password", key="reg_pw")
+        if st.button("新規登録を実行", use_container_width=True):
+            if new_email and new_pw:
+                if not df_users.empty and new_email in df_users["email"].values:
+                    st.error("このメールアドレスは既に登録されています。")
+                else:
+                    new_user = pd.DataFrame([[new_email, new_pw, "free"]], columns=["email", "password", "plan"])
+                    updated_users = pd.concat([df_users, new_user], ignore_index=True)
+                    if save_to_github(updated_users, USER_FILE, f"Register {new_email}", user_sha

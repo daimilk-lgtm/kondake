@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.2.0"
+VERSION = "1.2.1"  # 印刷エラー対策版
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -70,6 +70,10 @@ st.markdown("""
     }
     .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
     .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
+    .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
+    .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
+    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 20px; border: 1px solid #eee; }
+    .preview-table th, .preview-table td { padding: 10px; border: 1px solid #eee; text-align: left; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -106,7 +110,69 @@ with tab_plan:
     memo = st.text_area("メモ", placeholder="買い物リストに追加したいもの...")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
-        st.info("買い物リスト機能が実行されます")
+        new_history_entries = []
+        all_ings_list = []
+        rows_html = ""
+        
+        for d_str, data in weekly_plan.items():
+            v = data["menu"]
+            w_str = data["weekday"]
+            m_dish = f"{v.get('主菜1','-')} / {v.get('主菜2','-')}".replace("なし", "-")
+            s_dish = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
+            rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
+            for dish in v.values():
+                if dish != "なし":
+                    ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
+                    items = str(ing_raw).replace("、", ",").split(",")
+                    all_ings_list.extend([x.strip() for x in items if x.strip()])
+
+        if memo:
+            memo_items = memo.replace("、", ",").replace("\n", ",").split(",")
+            for m_item in memo_items:
+                if m_item.strip(): all_ings_list.append(f"{m_item.strip()} (メモ)")
+
+        if all_ings_list:
+            counts = pd.Series(all_ings_list).value_counts()
+            result_data = []
+            for item, count in counts.items():
+                category = "99未分類"
+                if df_dict is not None:
+                    for _, row in df_dict.iterrows():
+                        if row["材料"] in item: category = row["種別"]; break
+                result_data.append({"name": f"{item} × {count}" if count > 1 else item, "cat": category})
+            
+            df_res = pd.DataFrame(result_data).sort_values("cat")
+            cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
+            
+            st.markdown("### 🛒 買い物リスト")
+            st.markdown(cards_html, unsafe_allow_html=True)
+
+            # 印刷用HTMLの構築
+            raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
+            b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
+
+            # 改良版印刷ボタン
+            components.html(
+                f"""
+                <div style="margin-top:20px;">
+                    <button id="pbtn" style="width: 100%; background-color: #262730; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 1rem;">A4印刷する</button>
+                </div>
+                <script>
+                document.getElementById('pbtn').onclick = function() {{
+                    var html = atob('{b64_html}');
+                    var w = window.open('', '_blank');
+                    w.document.open();
+                    w.document.write(decodeURIComponent(escape(html)));
+                    w.document.close();
+                    setTimeout(function() {{
+                        w.focus();
+                        w.print();
+                    }}, 500);
+                }};
+                </script>
+                """,
+                height=80,
+            )
 
 with tab_hist:
     st.subheader("過去の履歴")
@@ -115,10 +181,7 @@ with tab_hist:
 
 with tab_manage:
     st.subheader("⚙️ メニュー管理")
-    
-    st.markdown("##### 既存メニューの編集")
     edit_dish = st.selectbox("編集する料理を選んでください", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
-    
     if edit_dish != "選択してください":
         current_data = df_menu[df_menu["料理名"] == edit_dish].iloc[0]
         with st.form("edit_form"):
@@ -126,38 +189,25 @@ with tab_manage:
             c_val = current_data["カテゴリー"]
             c_index = cats.index(c_val) if c_val in cats else 0
             new_c = st.selectbox("カテゴリー", cats, index=c_index)
-            new_m = st.text_area("材料（「、」区切り）", value=current_data["材料"])
-            
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.form_submit_button("変更を保存", use_container_width=True):
-                    df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [new_n, new_c, new_m]
-                    save_to_github(df_menu, FILE, f"Update {edit_dish}", menu_sha)
-                    st.success("更新しました！")
-                    st.cache_data.clear()
-                    st.rerun()
-            with c2:
-                if st.form_submit_button("この料理を削除", type="secondary", use_container_width=True):
-                    df_menu = df_menu[df_menu["料理名"] != edit_dish]
-                    save_to_github(df_menu, FILE, f"Delete {edit_dish}", menu_sha)
-                    st.warning("削除しました")
-                    st.cache_data.clear()
-                    st.rerun()
-
-    st.divider()
-    st.markdown("##### 新規メニューの追加")
-    with st.form("add_menu_form"):
-        n = st.text_input("料理名")
-        c = st.selectbox("カテゴリー", cats)
-        m = st.text_area("材料（「、」区切り）")
-        if st.form_submit_button("新規保存", use_container_width=True):
-            if n and m:
-                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
-                save_to_github(new_df, FILE, f"Add {n}", menu_sha)
-                st.success("追加しました！")
+            new_m = st.text_area("材料", value=current_data["材料"])
+            if st.form_submit_button("変更を保存"):
+                df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [new_n, new_c, new_m]
+                save_to_github(df_menu, FILE, f"Update {edit_dish}", menu_sha)
+                st.success("更新しました！")
                 st.cache_data.clear()
                 st.rerun()
 
     st.divider()
-    st.dataframe(df_menu, use_container_width=True)
+    with st.form("add_form"):
+        st.markdown("##### 新規メニューの追加")
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", cats)
+        m = st.text_area("材料")
+        if st.form_submit_button("新規保存"):
+            if n and m:
+                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
+                save_to_github(new_df, FILE, f"Add {n}", menu_sha)
+                st.cache_data.clear()
+                st.rerun()
+
     st.markdown(f'<div style="text-align: right; color: #ddd; font-size: 0.6rem; margin-top: 50px;">Version {VERSION}</div>', unsafe_allow_html=True)

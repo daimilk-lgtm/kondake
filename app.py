@@ -17,7 +17,7 @@ def validate_system_integrity():
     return check_results
 
 # --- 1. 設定 ---
-VERSION = "test-v1.0.9"
+VERSION = "test-v1.1.0"
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
@@ -85,7 +85,7 @@ with t_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v109_{i}_{c}") for c in cats}
+            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v110_{i}_{c}") for c in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
     memo = st.text_area("メモ")
@@ -93,7 +93,7 @@ with t_plan:
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings = []
         new_entries = []
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S") # 同時更新を識別用
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         
         for d_str, data in weekly_plan.items():
             for c_type, dish in data["menu"].items():
@@ -144,8 +144,6 @@ with t_plan:
 
 with t_hist:
     if not df_hist.empty:
-        # 料理名を日付・更新タイミング(uid)ごとに結合
-        # uidがない旧データへの配慮を含めた集計
         group_cols = ["日付", "曜日"]
         if "uid" in df_hist.columns:
             group_cols.append("uid")
@@ -153,7 +151,7 @@ with t_hist:
         display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
         display_df = display_df.sort_values("日付", ascending=False)
         
-        # 列幅の調整設定
+        # 料理名列を「折り返し」設定にする
         st.dataframe(
             display_df[["日付", "曜日", "料理名"]],
             column_config={
@@ -164,6 +162,13 @@ with t_hist:
             use_container_width=True,
             hide_index=True
         )
+        # テーブル全体の行を折り返し表示にするスタイル調整
+        st.markdown("""
+            <style>
+                [data-testid="stTable"] td { white-space: normal !important; }
+                div[data-testid="stDataFrame"] div[class*="StyledTableCell"] { white-space: normal !important; }
+            </style>
+        """, unsafe_allow_html=True)
 
 with t_manage:
     edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))

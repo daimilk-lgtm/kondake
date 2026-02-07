@@ -17,7 +17,7 @@ def validate_system_integrity():
     return check_results
 
 # --- 1. 設定 ---
-VERSION = "test-v1.1.3"
+VERSION = "test-v1.1.4"
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
@@ -36,10 +36,15 @@ st.markdown("""
     
     /* 履歴テーブル用スタイル調整 */
     .history-container table { width: 100% !important; border-collapse: collapse; }
-    .history-container td, .history-container th { white-space: normal !important; word-wrap: break-word !important; border: 1px solid #eee; padding: 8px; text-align: left; }
-    /* 日付(1列目)と曜日(2列目)の折り返し禁止と幅指定 */
-    .history-container td:nth-child(1), .history-container th:nth-child(1) { white-space: nowrap !important; width: 100px !important; }
-    .history-container td:nth-child(2), .history-container th:nth-child(2) { white-space: nowrap !important; width: 40px !important; }
+    .history-container td, .history-container th { border: 1px solid #eee; padding: 10px 8px; text-align: left; }
+    /* 見出しを中央揃えにする */
+    .history-container th { text-align: center !important; font-weight: 400 !important; background-color: #fcfcfc; }
+    /* 日付(1列目)の折り返し禁止 */
+    .history-container td:nth-child(1), .history-container th:nth-child(1) { white-space: nowrap !important; width: 105px !important; text-align: center; }
+    /* 曜日(2列目)の折り返し禁止と幅をわずかに拡張 */
+    .history-container td:nth-child(2), .history-container th:nth-child(2) { white-space: nowrap !important; width: 55px !important; text-align: center; }
+    /* 料理名(3列目)の折り返し */
+    .history-container td:nth-child(3) { white-space: normal !important; word-wrap: break-word !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -92,7 +97,7 @@ with t_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v113_{i}_{c}") for c in cats}
+            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v114_{i}_{c}") for c in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
     memo = st.text_area("メモ")
@@ -155,11 +160,9 @@ with t_hist:
         if "uid" in df_hist.columns:
             group_cols.append("uid")
         
-        # タイミングごとに集約
         display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
         display_df = display_df.sort_values("日付", ascending=False)
         
-        # HTML形式でインデックス列なしのテーブルを出力
         st.markdown('<div class="history-container">', unsafe_allow_html=True)
         st.write(display_df[["日付", "曜日", "料理名"]].to_html(index=False, escape=False), unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)

@@ -13,17 +13,21 @@ FILE = "menu.csv"
 USER_FILE = "users.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 2. デザイン定義 (Noto Sans JP, ノイズ消去) ---
+# --- 2. デザイン定義 (指示通りノイズを消し、Noto Sans JPを適用) ---
 st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
+    
+    /* フォント指定：Noto Sans JP */
     html, body, [class*="css"], p, div, select, input, label, span {
         font-family: 'Noto Sans JP', sans-serif !important;
         font-weight: 300 !important;
     }
     .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
-    header[data-testid="stHeader"] { background: transparent !important; color: transparent !important; }
+    
+    /* ノイズ消去：ヘッダーとサイドバーボタンを隠す */
+    header[data-testid="stHeader"] { background: transparent !important; color: transparent !important; pointer-events: none; }
     [data-testid="stSidebarCollapseButton"] { display: none !important; }
     .block-container { padding-top: 1rem !important; }
 </style>
@@ -38,7 +42,6 @@ def get_github_file(filename):
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             df = pd.read_csv(io.StringIO(raw))
-            # 内部での列名変換 (email -> username)
             if filename == USER_FILE and 'email' in df.columns:
                 df = df.rename(columns={'email': 'username'})
             return df, r.json()["sha"]
@@ -46,7 +49,6 @@ def get_github_file(filename):
     return pd.DataFrame(), None
 
 def save_to_github(df, filename, message, current_sha=None):
-    # 保存時に email に戻す
     save_df = df.rename(columns={"username": "email"}) if filename == USER_FILE else df
     csv_content = save_df.to_csv(index=False, encoding="utf-8-sig")
     content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
@@ -56,7 +58,7 @@ def save_to_github(df, filename, message, current_sha=None):
     res = requests.put(url, headers=headers, json=data)
     return res.status_code
 
-# --- 4. 認証フロー ---
+# --- 4. 認証フロー (ログイン画面もデザイン統一) ---
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
@@ -70,29 +72,24 @@ if not st.session_state["authenticated"]:
             if not df_users.empty and u in df_users["username"].values:
                 st.session_state.update({"authenticated": True, "username": u})
                 st.rerun()
+            else:
+                st.error("認証に失敗しました")
     st.stop()
 
 # --- 5. メインアプリ ---
-st.markdown('<div style="text-align:right">', unsafe_allow_html=True)
-if st.button("ログアウト"):
-    st.session_state["authenticated"] = False
-    st.rerun()
-st.markdown('</div>', unsafe_allow_html=True)
-
+st.markdown('<div style="text-align:right"><small>Logged in as: ' + st.session_state['username'] + '</small></div>', unsafe_allow_html=True)
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
-st.caption(f"Logged in as: {st.session_state['username']}")
 
 df_menu, menu_sha = get_github_file(FILE)
 
 t_plan, t_hist, t_manage = st.tabs(["📋 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
-# --- 献立作成 (日曜スタート) ---
 with t_plan:
+    # 日曜スタート仕様：(今日の日数 + 1) % 7 で直近の日曜を出す
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
-    # 修正：SyntaxErrorの原因となったタグを削除
-    start_date = st.date_input("開始日（日）", value=default_sun)
+    start_date = st.date_input("開始日（日曜日）", value=default_sun)
     
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     d_tabs = st.tabs(day_labels)
@@ -105,29 +102,29 @@ with t_plan:
                 st.selectbox(c, opts, key=f"sel_{i}_{c}")
     st.button("確定して買い物リストを生成", type="primary", use_container_width=True)
 
-# --- メニュー管理 (編集・削除機能) ---
 with t_manage:
     st.subheader("登録メニューの編集・削除")
     if not df_menu.empty:
+        # 編集可能なモダンな表。列順も仕様通り
         edited_df = st.data_editor(
             df_menu,
             column_order=["料理名", "カテゴリー", "材料"],
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
-            key="editor"
+            key="m_editor"
         )
-        if st.button("変更を確定して保存", type="primary", use_container_width=True):
-            save_to_github(edited_df, FILE, "Update menu via editor", menu_sha)
-            st.success("保存完了")
+        if st.button("変更を確定してGitHubへ保存", type="primary", use_container_width=True):
+            save_to_github(edited_df, FILE, "Update menu data", menu_sha)
+            st.success("メニューを更新しました")
             st.rerun()
     
-    with st.expander("＋ 新しい料理を追加"):
+    with st.expander("＋ 新しい料理を個別に追加"):
         with st.form("add_new", clear_on_submit=True):
             n_cat = st.selectbox("カテゴリー", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"])
             n_name = st.text_input("料理名")
             n_ing = st.text_area("材料")
-            if st.form_submit_button("保存"):
+            if st.form_submit_button("この内容で保存"):
                 new_row = pd.DataFrame([[n_name, n_cat, n_ing]], columns=["料理名", "カテゴリー", "材料"])
                 updated = pd.concat([df_menu, new_row], ignore_index=True)
                 save_to_github(updated, FILE, f"Add {n_name}", menu_sha)

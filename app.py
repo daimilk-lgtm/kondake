@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.1.4"  # 印刷用コードの露出修正、履歴の整理、自動プレビューの停止
+VERSION = "1.1.5"  # 印刷ボタンのJSエラーと表示崩れを完全修正
 
 import streamlit as st
 import pandas as pd
@@ -39,7 +39,7 @@ def get_history_data():
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             df_h = pd.read_csv(io.StringIO(raw))
-            # 全体の None や NaN を空文字に置換
+            # 履歴のNone対策
             df_h = df_h.replace({pd.NA: "", None: "", "None": ""}).fillna("")
             return df_h, r.json()["sha"]
         else:
@@ -117,7 +117,7 @@ with tab_plan:
 
     memo = st.text_area("メモ（買い物リストに追加したいものなど）", placeholder="例：卵、牛乳、洗剤...")
 
-    if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
+    if st.button("確定して買い物リストを生成", type="primary", key="confirm_btn", use_container_width=True):
         st.divider()
         new_history_entries = []
         all_ings_list = []
@@ -137,7 +137,8 @@ with tab_plan:
             s_dish = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
 
-        if st.button("この内容で履歴を保存", type="secondary"):
+        # 履歴保存
+        if st.button("この内容で履歴を保存", type="secondary", key="save_hist_btn"):
             if new_history_entries:
                 new_hist_df = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
                 save_to_github(new_hist_df, HIST_FILE, "Update history", hist_sha)
@@ -166,10 +167,10 @@ with tab_plan:
             cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
             st.markdown(cards_html, unsafe_allow_html=True)
 
-            # 印刷用HTMLを一行にまとめてJSエラーを回避
-            clean_print_html = f"""<html><head><style>body{{font-family:sans-serif;padding:20px;}}table{{width:100%;border-collapse:collapse;margin-bottom:20px;}}th,td{{border:1px solid #eee;padding:10px;text-align:left;font-size:13px;}}th{{background:#fafafa;}}.shopping-card{{border:1px solid #f0f0f0;padding:15px;margin-bottom:10px;border-radius:12px;}}.category-label{{font-size:11px;color:#999;margin-bottom:5px;}}.item-row{{font-size:14px;padding:4px 0;border-bottom:1px solid #f9f9f9;}}</style></head><body><h2>🗓 今週の献立</h2><table><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}<script>window.onload=function(){{window.print();}};</script></body></html>""".replace("'", "\\'")
+            # --- 印刷用HTML (Base64化してJSエラーを物理的に封印) ---
+            raw_html = f"""<html><head><style>body{{font-family:sans-serif;padding:20px;}}table{{width:100%;border-collapse:collapse;margin-bottom:20px;}}th,td{{border:1px solid #eee;padding:10px;text-align:left;font-size:13px;}}th{{background:#fafafa;}}.shopping-card{{border:1px solid #f0f0f0;padding:15px;margin-bottom:10px;border-radius:12px;}}.category-label{{font-size:11px;color:#999;margin-bottom:5px;}}.item-row{{font-size:14px;padding:4px 0;border-bottom:1px solid #f9f9f9;}}</style></head><body><h2>🗓 今週の献立</h2><table><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}<script>window.onload=function(){{window.print();}};</script></body></html>"""
+            b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
 
-            # ボタンのコンポーネント
             components.html(
                 f"""
                 <div style="margin-top:20px;">
@@ -177,8 +178,9 @@ with tab_plan:
                 </div>
                 <script>
                 document.getElementById('pbtn').onclick = function() {{
+                    var html = atob('{b64_html}');
                     var w = window.open();
-                    w.document.write('{clean_print_html}');
+                    w.document.write(decodeURIComponent(escape(html)));
                     w.document.close();
                 }};
                 </script>
@@ -189,9 +191,9 @@ with tab_plan:
 with tab_hist:
     st.subheader("過去の履歴")
     if not df_hist.empty:
-        # None 文字列などを除去して整理
-        display_hist = df_hist.sort_values("日付", ascending=False)
-        display_hist = display_hist[["日付", "曜日", "料理名"]]
+        # 表示を整える（日付、曜日、料理名）
+        display_hist = df_hist.copy()
+        display_hist = display_hist[["日付", "曜日", "料理名"]].sort_values("日付", ascending=False)
         st.dataframe(display_hist, use_container_width=True, hide_index=True,
             column_config={
                 "日付": st.column_config.TextColumn("日付", width="small"),
@@ -203,7 +205,7 @@ with tab_hist:
 
 with tab_manage:
     st.subheader("⚙️ メニュー管理")
-    with st.form("add", clear_on_submit=True):
+    with st.form("add_menu_form", clear_on_submit=True):
         n = st.text_input("料理名")
         c = st.selectbox("カテゴリー", cats)
         m = st.text_area("材料（「、」区切り）")

@@ -1,183 +1,158 @@
 import streamlit as st
-import pd
+import pandas as pd
 import requests
 import base64
 import io
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta
-import re
 
-# --- 0. 仕様防衛システム ---
-def validate_system_integrity():
-    check_results = []
-    test_date = datetime(2026, 2, 7) 
-    offset = (test_date.weekday() + 1) % 7
-    if (test_date - timedelta(days=offset)).weekday() != 6:
-        check_results.append("日曜開始ロジック不備")
-    return check_results
-
-# --- 1. 設定 ---
-VERSION = "test-v1.1.2"
+# --- 0. 基本情報 ---
+VERSION = "1.3.9"
 REPO = "daimilk-lgtm/kondake"
-FILE = "menu.csv"
-DICT_FILE = "ingredients.csv"
+USER_FILE = "users.csv"
+MENU_FILE = "menu.csv"
 HIST_FILE = "history.csv"
+DICT_FILE = "ingredients.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
-    html, body, [class*="css"], p, div, select, input, label, span { font-family: 'Noto Sans JP', sans-serif !important; font-weight: 300 !important; }
-    .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
-    header[data-testid="stHeader"] { background: transparent !important; color: transparent !important; }
-    .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; color: #333; }
-    .category-label { font-size: 0.8rem; color: #999; border-bottom: 1px solid #f9f9f9; margin-bottom: 5px; }
-    
-    /* 履歴テーブル用スタイル調整 */
-    .history-table td { white-space: normal !important; word-wrap: break-word !important; }
-    /* 日付と曜日の列を折り返さない設定 */
-    .history-table td:nth-child(1), .history-table td:nth-child(2) { white-space: nowrap !important; }
-    /* 列幅の明示的な指定 */
-    .history-table th:nth-child(1) { width: 110px !important; }
-    .history-table th:nth-child(2) { width: 50px !important; }
-</style>
-""", unsafe_allow_html=True)
-
-if validate_system_integrity():
-    st.error("システム整合性エラー")
-    st.stop()
-
-@st.cache_data(ttl=60)
-def get_data(filename):
+# --- 1. GitHub連携関数 ---
+def get_github_data(filename, is_user=False):
     try:
         url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
         headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
-            return pd.read_csv(io.StringIO(raw)), r.json()["sha"]
+            if is_user:
+                df = pd.read_csv(io.StringIO(raw), sep=r'\s+', engine='python', dtype=str)
+            else:
+                df = pd.read_csv(io.StringIO(raw))
+            df.columns = [c.strip() for c in df.columns]
+            return df, r.json()["sha"]
     except: pass
     return pd.DataFrame(), None
 
-def save_to_github(df, filename, message, current_sha):
-    csv_content = df.to_csv(index=False, encoding="utf-8-sig")
+def save_to_github(df, filename, message, current_sha=None, is_user=False):
+    sep = "\t" if is_user else ","
+    csv_content = df.to_csv(index=False, encoding="utf-8-sig", sep=sep)
     content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
     url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
     headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    data = {"message": message, "content": content_b64, "sha": current_sha}
+    data = {"message": message, "content": content_b64}
+    if current_sha: data["sha"] = current_sha
     res = requests.put(url, headers=headers, json=data)
     return res.status_code
 
-# --- 2. メイン ---
-st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+# --- 2. 認証UI ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-df_menu, menu_sha = get_data(FILE)
-df_hist, hist_sha = get_data(HIST_FILE)
-df_dict, _ = get_data(DICT_FILE)
+def login_ui():
+    st.markdown("<h1 style='text-align: center; font-weight: 100; font-size: 3rem;'>献だけ</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        tab_l, tab_s = st.tabs(["ログイン", "新規登録"])
+        df_users, user_sha = get_github_data(USER_FILE, is_user=True)
+        with tab_l:
+            l_email = st.text_input("メールアドレス")
+            l_pw = st.text_input("パスワード", type="password")
+            if st.button("ログイン", type="primary", use_container_width=True):
+                df_users = df_users.astype(str).apply(lambda x: x.str.strip())
+                match = df_users[(df_users["email"] == l_email.strip()) & (df_users["password"] == l_pw.strip())]
+                if not match.empty:
+                    st.session_state.logged_in = True
+                    st.session_state.u_email = l_email.strip()
+                    st.session_state.u_plan = match.iloc[0]["plan"]
+                    st.rerun()
+                else: st.error("不一致です")
+        with tab_s:
+            n_email = st.text_input("登録用アドレス")
+            n_pw = st.text_input("設定用パスワード", type="password")
+            if st.button("登録", use_container_width=True):
+                if n_email and n_pw:
+                    new_df = pd.concat([df_users, pd.DataFrame([[n_email, n_pw, "free"]], columns=["email", "password", "plan"])], ignore_index=True)
+                    save_to_github(new_df, USER_FILE, f"New user {n_email}", user_sha, is_user=True)
+                    st.success("完了")
 
-cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
-t_plan, t_hist, t_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
+# --- 3. メインアプリ ---
+if not st.session_state.logged_in:
+    login_ui()
+else:
+    st.markdown("<h1 style='text-align: center; font-weight: 100; font-size: 4rem; margin-bottom: 1rem;'>献だけ</h1>", unsafe_allow_html=True)
+    
+    with st.sidebar:
+        st.write(f"USER: {st.session_state.u_email}")
+        if st.button("ログアウト", use_container_width=True):
+            st.session_state.logged_in = False
+            st.rerun()
+        if st.session_state.u_plan == "free":
+            st.markdown("---")
+            st.caption("AD: プレミアムプランで広告非表示")
 
-with t_plan:
+    df_menu, _ = get_github_data(MENU_FILE)
+    df_dict, _ = get_github_data(DICT_FILE)
+
+    # 日曜始まりの設定
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
-    start_date = st.date_input("開始日（日）", value=today - timedelta(days=offset))
-    
-    weekly_plan = {}
-    day_labels = ["日", "月", "火", "水", "木", "金", "土"]
-    d_tabs = st.tabs(day_labels)
-    
-    for i, tab in enumerate(d_tabs):
-        target_date = start_date + timedelta(days=i)
-        d_str = target_date.strftime("%Y/%m/%d")
-        with tab:
-            st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v112_{i}_{c}") for c in cats}
-            weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
+    default_sun = today - timedelta(days=offset)
+    start_date = st.date_input("開始日（日）を選択", value=default_sun)
 
-    memo = st.text_area("メモ")
+    tab_create, tab_hist, tab_manage = st.tabs(["📝 献立作成", "📜 履歴", "⚙️ 管理"])
 
-    if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
-        all_ings = []
-        new_entries = []
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        
-        for d_str, data in weekly_plan.items():
-            for c_type, dish in data["menu"].items():
-                if dish != "なし":
-                    new_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": dish, "uid": timestamp})
-                    row = df_menu[df_menu["料理名"] == dish]
-                    if not row.empty:
-                        items = re.split(r'[,、\n]', str(row.iloc[0]["材料"]))
-                        all_ings.extend([x.strip() for x in items if x.strip()])
-        
-        if all_ings:
-            st.markdown("---")
-            counts = pd.Series(all_ings + ([m.strip() for m in re.split(r'[,、\n]', memo) if m.strip()] if memo else [])).value_counts().reset_index()
-            counts.columns = ["name", "count"]
+    with tab_create:
+        day_labels = ["日", "月", "火", "水", "木", "金", "土"]
+        cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
+        days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
+        weekly_plan = {}
+
+        for i, day_tab in enumerate(days_tabs):
+            target_date = start_date + timedelta(days=i)
+            d_str = target_date.strftime("%Y/%m/%d")
+            with day_tab:
+                st.write(f"{d_str} ({day_labels[i]})")
+                day_menu = {cat: st.selectbox(cat, ["なし"] + df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist(), key=f"s_{i}_{cat}") for cat in cats}
+                weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
+
+        memo = st.text_area("追加メモ", placeholder="牛乳、パンなど")
+
+        if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
+            all_ings = []
+            rows_html = ""
+            for d_str, data in weekly_plan.items():
+                v, w = data["menu"], data["weekday"]
+                m_dish = f"{v.get('主菜1','-')} / {v.get('主菜2','-')}".replace("なし", "-")
+                s_dish = f"{v.get('副菜1','-')}, {v.get('副菜2','-')}, {v.get('汁物','-')}".replace("なし", "-")
+                rows_html += f'<tr><td>{d_str}({w})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
+                for dish in v.values():
+                    if dish != "なし" and not df_menu[df_menu["料理名"] == dish].empty:
+                        ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
+                        all_ings.extend([x.strip() for x in str(ing_raw).replace("、", ",").split(",") if x.strip()])
             
-            def get_cat(item):
-                if df_dict is not None and not df_dict.empty:
-                    for _, row in df_dict.iterrows():
-                        if row["材料"] in item: return row["種別"]
-                return "99未分類"
+            if memo: all_ings.extend([x.strip() for x in memo.replace("\n", ",").split(",") if x.strip()])
             
-            counts["cat"] = counts["name"].apply(get_cat)
-            cards_html = ""
-            for cat, group in counts.sort_values("cat").groupby("cat"):
-                items_html = "".join([f'<div style="font-size:1.1rem; padding:4px 0;">□ {row["name"]} {"× "+str(row["count"]) if row["count"] > 1 else ""}</div>' for _, row in group.iterrows()])
-                cards_html += f'<div class="shopping-card"><div class="category-label">{cat}</div>{items_html}</div>'
-            st.markdown(cards_html, unsafe_allow_html=True)
-            
-            b64_print = base64.b64encode(f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🛒 買い物リスト</h2>{cards_html}</body></html>".encode()).decode()
-            components.html(f"""
-                <button id="p" style="width:100%; height:45px; background:#262730; color:white; border:none; border-radius:8px; cursor:pointer;">A4印刷</button>
-                <script>
-                document.getElementById('p').onclick = () => {{
-                    var w = window.open();
-                    w.document.write(atob('{b64_print}'));
-                    w.document.close();
-                    setTimeout(() => {{ w.print(); }}, 500);
-                }};
-                </script>
-            """, height=60)
+            if all_ings:
+                counts = pd.Series(all_ings).value_counts()
+                res_list = []
+                for item, count in counts.items():
+                    cat = "99未分類"
+                    if not df_dict.empty:
+                        for _, r in df_dict.iterrows():
+                            if r["材料"] in item: cat = r["種別"]; break
+                    res_list.append({"name": f"{item} × {count}" if count > 1 else item, "cat": cat})
+                
+                df_res = pd.DataFrame(res_list).sort_values("cat")
+                cards_html = "".join([f'<div style="background:#fff; padding:10px; border:1px solid #ddd; border-radius:8px; margin-bottom:8px;"><div style="font-size:0.7rem; color:#888;">{c}</div>' + "".join([f'<div>□ {r["name"]}</div>' for _, r in g.iterrows()]) + '</div>' for c, g in df_res.groupby("cat")])
+                
+                st.markdown("### 🛒 買い物リスト")
+                st.markdown(cards_html, unsafe_allow_html=True)
+                
+                raw_html = f"<html><body style='font-family:sans-serif; padding:20px;'><h2>🗓 献立</h2><table style='width:100%; border-collapse:collapse;' border='1'><tr><th>日付</th><th>主菜</th><th>副菜・他</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
+                b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
+                components.html(f"""<button id='pb' style='width:100%; padding:12px; background:#262730; color:white; border:none; border-radius:8px; cursor:pointer;'>A4印刷 / PDF保存</button>
+                    <script>document.getElementById('pb').onclick=function(){{var w=window.open('','_blank');w.document.write(atob('{b64_html}'));w.document.close();setTimeout(function(){{w.focus();w.print();}},500);}}</script>""", height=60)
 
-            if new_entries:
-                _, l_sha = get_data(HIST_FILE)
-                u_hist = pd.concat([df_hist, pd.DataFrame(new_entries)], ignore_index=True).drop_duplicates()
-                save_to_github(u_hist, HIST_FILE, f"Update {VERSION}", l_sha)
-                st.success("履歴を保存しました")
-                st.cache_data.clear()
-
-with t_hist:
-    if not df_hist.empty:
-        group_cols = ["日付", "曜日"]
-        if "uid" in df_hist.columns:
-            group_cols.append("uid")
-        
-        display_df = df_hist.groupby(group_cols, sort=False)["料理名"].apply(lambda x: "、".join(x)).reset_index()
-        display_df = display_df.sort_values("日付", ascending=False)
-        
-        # 料理名のみを抽出し、不要なインデックス（左端の数字）を削除して表示
-        st.markdown('<div class="history-table">', unsafe_allow_html=True)
-        # index=False で左端の列を削除
-        st.table(display_df[["日付", "曜日", "料理名"]].assign(dummy="").set_index("dummy").index.rename(None))
-        # 代わりに、インデックスなしのHTMLテーブルとして直接出力
-        st.write(display_df[["日付", "曜日", "料理名"]].to_html(index=False, classes="history-table", escape=False), unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-with t_manage:
-    edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
-    if edit_dish != "選択してください":
-        curr = df_menu[df_menu["料理名"] == edit_dish].iloc[0]
-        with st.form("edit_f"):
-            n_n = st.text_input("料理名", value=curr["料理名"])
-            n_c = st.selectbox("カテゴリー", cats, index=cats.index(curr["カテゴリー"]))
-            n_m = st.text_area("材料", value=curr["材料"])
-            if st.form_submit_button("保存"):
-                df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [n_n, n_c, n_m]
-                save_to_github(df_menu, FILE, f"Edit {edit_dish}", menu_sha)
-                st.rerun()
-
-st.markdown(f'<div style="text-align:right; font-size:0.6rem; color:#ddd;">{VERSION}</div>', unsafe_allow_html=True)
+    with tab_hist:
+        st.write("履歴機能（開発中）")
+    with tab_manage:
+        st.write("メニュー管理（開発中）")

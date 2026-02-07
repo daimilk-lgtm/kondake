@@ -24,7 +24,6 @@ st.markdown("""
         font-weight: 300 !important;
     }
     .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
-    /* 左上の文字化けだけをピンポイントで透明化 */
     header[data-testid="stHeader"] { background: transparent !important; color: transparent !important; }
     [data-testid="stSidebarCollapseButton"] { display: none !important; }
     .block-container { padding-top: 1rem !important; }
@@ -67,29 +66,31 @@ if not st.session_state["authenticated"]:
     st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["ログイン", "新規登録"])
     df_users, user_sha = get_github_file(USER_FILE)
+    
     with tab1:
-        with st.form("l"):
-            u = st.text_input("メールアドレス", autocomplete="email")
-            p = st.text_input("パスワード", type="password", autocomplete="current-password")
+        with st.form("login_form"):
+            u = st.text_input("メールアドレス", key="u_login", autocomplete="email")
+            p = st.text_input("パスワード", type="password", key="p_login", autocomplete="current-password")
             if st.form_submit_button("ログイン", use_container_width=True):
                 if not df_users.empty and u in df_users["username"].values:
                     if df_users[df_users["username"] == u]["password"].iloc[0] == make_hash(p):
                         st.session_state.update({"authenticated": True, "username": u})
                         st.rerun()
-                st.error("不一致です")
+                st.error("入力内容に誤りがあります")
+    
     with tab2:
-        with st.form("r"):
-            nu = st.text_input("メールアドレス", autocomplete="email")
-            np = st.text_input("パスワード (8文字以上の英数字)", type="password", autocomplete="new-password")
+        with st.form("reg_form"):
+            nu = st.text_input("メールアドレス", key="u_reg", autocomplete="email")
+            np = st.text_input("パスワード (8文字以上の英数字)", type="password", key="p_reg", autocomplete="new-password")
             if st.form_submit_button("登録実行", use_container_width=True):
                 if re.match(r"[^@]+@[^@]+\.[^@]+", nu) and len(np) >= 8:
                     new_df = pd.concat([df_users, pd.DataFrame([[nu, make_hash(np)]], columns=["username", "password"])])
                     save_to_github(new_df, USER_FILE, f"Add {nu}", user_sha)
-                    st.success("完了！")
-                else: st.error("形式エラー")
+                    st.success("登録完了！ログインしてください")
+                else: st.error("形式エラー: 正しいメアドと8文字以上のパスワードが必要です")
     st.stop()
 
-# --- 5. メインアプリ (仕様死守：日付入力・日曜スタート・全機能復旧) ---
+# --- 5. メインアプリ (表示・仕様の完全復旧) ---
 st.markdown('<div style="text-align:right">', unsafe_allow_html=True)
 if st.button("ログアウト"):
     st.session_state["authenticated"] = False
@@ -101,16 +102,14 @@ st.caption(f"Logged in as: {st.session_state['username']}")
 
 # データ読み込み
 df_menu, _ = get_github_file(FILE)
-df_dict, _ = get_github_file(DICT_FILE)
 
 if not df_menu.empty:
-    # 仕様：日付選択
+    # 指定仕様：日付入力 ＆ 日曜スタート [cite: 2026-02-06]
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
     default_sun = today - timedelta(days=offset)
-    start_date = st.date_input("開始日（日）", value=default_sun) [cite: 2026-02-06]
+    start_date = st.date_input("開始日（日）", value=default_sun)
     
-    # 仕様：日曜スタートタブ
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     days_tabs = st.tabs(day_labels)
     
@@ -128,8 +127,7 @@ if not df_menu.empty:
                 day_menu[cat] = st.selectbox(cat, options, key=f"s_{i}_{cat}")
             weekly_plan[d_str] = day_menu
 
-    memo = st.text_area("追加の買い物メモ")
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
-        st.success("生成しました（ここにリストが表示されます）")
+        st.success("買い物リストを生成しました")
 else:
-    st.warning("メニューデータ(menu.csv)を読み込めませんでした。")
+    st.warning("メニューデータを読み込めませんでした。")

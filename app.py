@@ -9,7 +9,7 @@ REPO = "daimilk-lgtm/kondake"
 USER_FILE = "users.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-# --- 1. 読み込み関数 ---
+# --- 1. 読み込み関数 (自動判別・ズレ防止版) ---
 def get_github_data(filename):
     try:
         url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
@@ -18,46 +18,49 @@ def get_github_data(filename):
         if r.status_code == 200:
             content_data = r.json()
             raw = base64.b64decode(content_data["content"]).decode("utf-8-sig")
-            # タブ区切りとカンマ区切りの両方に対応する工夫
-            sep = "\t" if "\t" in raw else ","
-            df = pd.read_csv(io.StringIO(raw), sep=sep)
+            
+            # 【対策1】区切り文字（タブ、カンマ、スペース）を自動判別
+            # engine='python' を使うことで、曖昧な区切りにも対応します
+            df = pd.read_csv(io.StringIO(raw), sep=r'\s+|,', engine='python')
+            
+            # 【対策2】列名の前後に空白があれば削除
+            df.columns = [c.strip() for c in df.columns]
             return df, content_data["sha"]
     except Exception as e:
         st.error(f"データ取得エラー: {e}")
     return pd.DataFrame(), None
 
-# --- 2. ログインUI（デバッグ機能付き） ---
+# --- 2. ログインUI ---
 def login_ui():
     st.title("ログイン")
     
-    # 最新のユーザーリストを強制的に取得
     df_users, _ = get_github_data(USER_FILE)
     
-    # 【デバッグ用】今の登録状況をひっそり表示（確認したら消してください）
-    with st.expander("登録状況の確認（デバッグ用）"):
-        st.write("現在のusers.csvの中身:", df_users)
+    with st.expander("登録状況の確認（ここが正しく並んでいればOK）"):
+        st.write(df_users)
 
     l_email = st.text_input("メールアドレス")
+    # パスワードは 0 から始まる可能性があるので、数値ではなく文字列として扱います
     l_pw = st.text_input("パスワード", type="password")
     
     if st.button("ログイン", type="primary", use_container_width=True):
         if not df_users.empty:
-            # 前後の余計な空白を削除して比較
-            df_users['email'] = df_users['email'].astype(str).str.strip()
-            df_users['password'] = df_users['password'].astype(str).str.strip()
+            # 【対策3】全データを文字列に変換し、前後の空白を徹底的に消す
+            df_users = df_users.astype(str).apply(lambda x: x.str.strip())
             
-            match = df_users[(df_users["email"] == l_email.strip()) & (df_users["password"] == l_pw.strip())]
+            # 入力値と比較
+            match = df_users[(df_users["email"] == l_email.strip()) & 
+                             (df_users["password"] == l_pw.strip())]
             
             if not match.empty:
                 st.session_state.logged_in = True
-                st.session_state.u_email = l_email
-                st.session_state.u_plan = match.iloc[0]["plan"]
-                st.success("ログイン成功！")
+                st.session_state.u_email = l_email.strip()
+                st.session_state.u_plan = match.iloc[0].get("plan", "free")
                 st.rerun()
             else:
-                st.error("一致するユーザーが見つかりません。入力ミスか、登録がGitHubに反映されていない可能性があります。")
+                st.error("不一致です。上の『登録状況の確認』で、パスワードが password 列に正しく入っているか確認してください。")
         else:
-            st.error("ユーザーリストが空です。先に登録を行ってください。")
+            st.error("ユーザーデータが読み込めません。")
 
 # 制御ロジック
 if "logged_in" not in st.session_state:
@@ -66,7 +69,8 @@ if "logged_in" not in st.session_state:
 if not st.session_state.logged_in:
     login_ui()
 else:
-    st.write(f"ようこそ、{st.session_state.u_email}さん！")
+    st.balloons()
+    st.success(f"ログイン成功！ {st.session_state.u_email} さん")
     if st.button("ログアウト"):
         st.session_state.logged_in = False
         st.rerun()

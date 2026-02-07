@@ -7,19 +7,17 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 import re
 
-# --- 0. 仕様防衛システム (Self-Guard) ---
+# --- 0. 仕様防衛システム ---
 def validate_system_integrity():
     check_results = []
     test_date = datetime(2026, 2, 7) 
     offset = (test_date.weekday() + 1) % 7
     if (test_date - timedelta(days=offset)).weekday() != 6:
         check_results.append("日曜開始ロジック不備")
-    if "components" not in globals():
-        check_results.append("印刷用ライブラリ未ロード")
     return check_results
 
 # --- 1. 設定 ---
-VERSION = "test-v1.0.7"
+VERSION = "test-v1.0.8"
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
@@ -39,7 +37,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if validate_system_integrity():
-    st.error(f"🚨 システム整合性エラー: {', '.join(validate_system_integrity())}")
+    st.error("システム整合性エラー")
     st.stop()
 
 @st.cache_data(ttl=60)
@@ -87,23 +85,19 @@ with t_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v107_{i}_{c}") for c in cats}
+            day_menu = {c: st.selectbox(c, ["なし"] + df_menu[df_menu["カテゴリー"] == c]["料理名"].tolist(), key=f"v108_{i}_{c}") for c in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
     memo = st.text_area("メモ")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings = []
-        new_history_rows = []
+        new_entries = []
         
         for d_str, data in weekly_plan.items():
-            day_selected_dishes = []
             for c_type, dish in data["menu"].items():
                 if dish != "なし":
-                    # 履歴用に全ての選択された料理をリスト化
-                    new_history_rows.append({"日付": d_str, "曜日": data["weekday"], "カテゴリー": c_type, "料理名": dish})
-                    day_selected_dishes.append(dish)
-                    
+                    new_entries.append({"日付": d_str, "曜日": data["weekday"], "カテゴリー": c_type, "料理名": dish})
                     row = df_menu[df_menu["料理名"] == dish]
                     if not row.empty:
                         items = re.split(r'[,、\n]', str(row.iloc[0]["材料"]))
@@ -111,7 +105,6 @@ with t_plan:
         
         if all_ings:
             st.markdown("---")
-            st.subheader("🛒 買い物リスト")
             counts = pd.Series(all_ings + ([m.strip() for m in re.split(r'[,、\n]', memo) if m.strip()] if memo else [])).value_counts().reset_index()
             counts.columns = ["name", "count"]
             
@@ -128,28 +121,32 @@ with t_plan:
                 cards_html += f'<div class="shopping-card"><div class="category-label">{cat}</div>{items_html}</div>'
             st.markdown(cards_html, unsafe_allow_html=True)
             
-            # 印刷
-            b64_print = base64.b64encode(f"<html><body style='font-family:sans-serif;'>{cards_html}</body></html>".encode()).decode()
-            components.html(f"<button id='p' style='width:100%; height:45px; background:#262730; color:white; border:none; border-radius:8px;'>A4印刷</button><script>document.getElementById('p').onclick=()=>{var w=window.open();w.document.write(atob('{b64_print}'));w.document.close();setTimeout(()=>w.print(),500);};</script>", height=60)
+            # --- 修正箇所: エスケープ処理 ---
+            b64_print = base64.b64encode(f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🛒 買い物リスト</h2>{cards_html}</body></html>".encode()).decode()
+            components.html(f"""
+                <button id="p" style="width:100%; height:45px; background:#262730; color:white; border:none; border-radius:8px; cursor:pointer;">A4印刷</button>
+                <script>
+                document.getElementById('p').onclick = () => {{
+                    var w = window.open();
+                    w.document.write(atob('{b64_print}'));
+                    w.document.close();
+                    setTimeout(() => {{ w.print(); }}, 500);
+                }};
+                </script>
+            """, height=60)
 
-            # 履歴保存 (全カテゴリーを保存)
-            if new_history_rows:
-                _, latest_sha = get_data(HIST_FILE)
-                updated_hist = pd.concat([df_hist, pd.DataFrame(new_history_rows)], ignore_index=True).drop_duplicates()
-                save_to_github(updated_hist, HIST_FILE, f"Update history {VERSION}", latest_sha)
-                st.success("全ての献立を履歴に保存しました。")
+            if new_entries:
+                _, l_sha = get_data(HIST_FILE)
+                u_hist = pd.concat([df_hist, pd.DataFrame(new_entries)], ignore_index=True).drop_duplicates()
+                save_to_github(u_hist, HIST_FILE, f"Update {VERSION}", l_sha)
+                st.success("履歴を保存しました")
                 st.cache_data.clear()
 
 with t_hist:
     if not df_hist.empty:
-        # 見やすくするために日付・カテゴリーでソート
-        display_hist = df_hist.sort_values(["日付", "カテゴリー"], ascending=[False, True])
-        st.dataframe(display_hist, use_container_width=True, hide_index=True)
-    else:
-        st.info("履歴はありません。")
+        st.dataframe(df_hist.sort_values(["日付", "カテゴリー"], ascending=[False, True]), use_container_width=True, hide_index=True)
 
 with t_manage:
-    # メニュー管理ロジック
     edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
     if edit_dish != "選択してください":
         curr = df_menu[df_menu["料理名"] == edit_dish].iloc[0]

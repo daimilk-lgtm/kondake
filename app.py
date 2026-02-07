@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.0.4"  # 履歴に曜日追加 & タブを独立化
+VERSION = "1.0.5"  # 履歴の列幅を最適化（日付・曜日を狭く、料理名を広く）
 
 import streamlit as st
 import pandas as pd
@@ -87,7 +87,6 @@ df_menu, menu_sha = get_menu_data()
 df_dict = get_dict_data()
 df_hist, hist_sha = get_history_data()
 
-# --- タブ構成の変更 ---
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
 day_labels = ["日", "月", "火", "水", "木", "金", "土"]
@@ -118,12 +117,10 @@ with tab_plan:
         rows_html = ""
         
         for d_str, data in weekly_plan.items():
-            day_dishes = []
             v = data["menu"]
             w_str = data["weekday"]
             for dish in v.values():
                 if dish != "なし":
-                    day_dishes.append(dish)
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     items = str(ing_raw).replace("、", ",").split(",")
@@ -134,16 +131,13 @@ with tab_plan:
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
 
         if new_history_entries:
-            # 曜日列がない古い履歴がある場合の対策
-            if "曜日" not in df_hist.columns:
-                df_hist["曜日"] = ""
+            if "曜日" not in df_hist.columns: df_hist["曜日"] = ""
             new_hist_df = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
-            save_to_github(new_hist_df, HIST_FILE, "Update history with weekday", hist_sha)
+            save_to_github(new_hist_df, HIST_FILE, "Update history", hist_sha)
             st.success("履歴を保存しました")
 
         st.markdown("### 📋 今週の献立チェック")
         st.markdown(f'<table class="preview-table"><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table>', unsafe_allow_html=True)
-        # 印刷用スクリプト（既存仕様維持）
         st.button("A4印刷する", on_click=lambda: st.write('<script>window.print();</script>', unsafe_allow_html=True))
 
         if all_ings_list:
@@ -164,11 +158,18 @@ with tab_plan:
 with tab_hist:
     st.subheader("過去の履歴")
     if not df_hist.empty:
-        # 日付と曜日が見えやすいように並び替え
-        display_hist = df_hist.copy()
-        if "曜日" in display_hist.columns:
-            display_hist = display_hist[["日付", "曜日", "料理名"]]
-        st.dataframe(display_hist.sort_values("日付", ascending=False), use_container_width=True, hide_index=True)
+        display_hist = df_hist.sort_values("日付", ascending=False)
+        # 列幅の調整設定
+        st.dataframe(
+            display_hist,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "日付": st.column_config.TextColumn("日付", width="small"),
+                "曜日": st.column_config.TextColumn("曜日", width="small"),
+                "料理名": st.column_config.TextColumn("料理名", width="large"),
+            }
+        )
     else:
         st.info("まだ履歴はありません。")
 

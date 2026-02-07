@@ -1,5 +1,5 @@
 # --- 0. バージョン管理情報 ---
-VERSION = "1.0.5"  # 履歴の列幅を最適化（日付・曜日を狭く、料理名を広く）
+VERSION = "1.0.6"  # 履歴の列順（日付・曜日・料理名）と幅を最適化
 
 import streamlit as st
 import pandas as pd
@@ -158,8 +158,11 @@ with tab_plan:
 with tab_hist:
     st.subheader("過去の履歴")
     if not df_hist.empty:
+        # 表示用の並び替え
         display_hist = df_hist.sort_values("日付", ascending=False)
-        # 列幅の調整設定
+        # 列の順番を 日付, 曜日, 料理名 に強制
+        display_hist = display_hist[["日付", "曜日", "料理名"]]
+        
         st.dataframe(
             display_hist,
             use_container_width=True,

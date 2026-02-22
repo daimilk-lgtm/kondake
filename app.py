@@ -107,6 +107,10 @@ with tab_plan:
             day_menu = {cat: st.selectbox(cat, ["なし"] + df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist(), key=f"s_{i}_{cat}") for cat in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
+ list_memo_options = ["なし"] + df_menu[df_menu["カテゴリー"] == "主菜2"]["料理名"].tolist()
+    selected_list_memo = st.selectbox("メモ (リスト)", list_memo_options, key="list_memo_select")
+    
+    
     memo = st.text_area("メモ", placeholder="買い物リストに追加したいもの...")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
@@ -126,6 +130,11 @@ with tab_plan:
                     items = str(ing_raw).replace("、", ",").split(",")
                     all_ings_list.extend([x.strip() for x in items if x.strip()])
 
+  if selected_list_memo != "なし":
+            ing_raw_memo = df_menu[df_menu["料理名"] == selected_list_memo]["材料"].iloc[0]
+            m_items = str(ing_raw_memo).replace("、", ",").split(",")
+            all_ings_list.extend([x.strip() for x in m_items if x.strip()])
+        
         if memo:
             memo_items = memo.replace("、", ",").replace("\n", ",").split(",")
             for m_item in memo_items:

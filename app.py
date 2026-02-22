@@ -11,6 +11,8 @@ import smtplib
 from email.mime.text import MIMEText
 import random
 import string
+import hashlib
+import os
 
 # ==============================================================================
 # 【仕様定義書 / SPECIFICATIONS & USER REQUESTS】
@@ -44,9 +46,10 @@ import string
 # - [2026/02/22] 印刷用HTMLの生成ロジックにおいて発生していたSyntaxErrorを、f-stringの修正により解消。
 # - [2026/02/22] ログイン画面下部の表示バグに対し、標準expanderを廃止。
 # - [2026/02/22] 再設定フロー中の表示バグに対し、標準st.status/st.errorを廃止し、独自Markdown表示に切り替え。
+# - [2026/02/22] セキュリティ向上のため、パスワード保存方式をPBKDF2（SHA256）によるハッシュ化方式に変更。
 # ==============================================================================
 
-VERSION = "1.8.1"
+VERSION = "1.9.0"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -60,6 +63,20 @@ TOKEN = st.secrets.get("GITHUB_TOKEN")
 # SMTP設定
 SMTP_USER = st.secrets.get("SMTP_USER")
 SMTP_PASS = st.secrets.get("SMTP_PASS")
+
+# パスワードハッシュ化関数
+def make_pw_hash(password, salt=None):
+    if salt is None:
+        salt = base64.b64encode(os.urandom(16)).decode('utf-8')
+    pw_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    return f"{salt}${base64.b64encode(pw_hash).decode('utf-8')}"
+
+def check_pw_hash(password, hash_str):
+    if "$" not in hash_str: # 旧平文パスワードとの互換性
+        return password == hash_str
+    salt, original_hash = hash_str.split("$")
+    new_hash = make_pw_hash(password, salt)
+    return new_hash == hash_str
 
 def get_github_content(filename):
     url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
@@ -195,8 +212,9 @@ if not st.session_state['authenticated']:
                         st.markdown('<div class="custom-error">パスワードが一致しません</div>', unsafe_allow_html=True)
                     else:
                         users, sha = get_users_data()
-                        users[st.session_state['reset_target_email']] = new_p
-                        save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reset: {st.session_state['reset_target_email']}", sha)
+                        # ハッシュ化して保存
+                        users[st.session_state['reset_target_email']] = make_pw_hash(new_p)
+                        save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reset (Hashed): {st.session_state['reset_target_email']}", sha)
                         st.session_state['auth_msg'] = "パスワードを更新しました。ログインしてください。"
                         st.session_state['reset_mode'] = "none"
                         st.session_state['show_forgot_pw'] = False
@@ -217,7 +235,7 @@ if not st.session_state['authenticated']:
                 p = st.text_input("パスワード", type="password", key="l_pass", autocomplete="current-password")
                 if st.form_submit_button("ログイン", use_container_width=True):
                     users, _ = get_users_data()
-                    if e in users and users[e] == p:
+                    if e in users and check_pw_hash(p, users[e]):
                         st.session_state['authenticated'] = True
                         st.session_state['user_email'] = e
                         st.session_state['auth_msg'] = ""
@@ -269,8 +287,9 @@ if not st.session_state['authenticated']:
                         if ne in users: 
                             st.markdown('<div class="custom-error">既に登録されているアドレスです</div>', unsafe_allow_html=True)
                         else:
-                            users[ne] = np
-                            save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reg: {ne}", sha)
+                            # ハッシュ化して保存
+                            users[ne] = make_pw_hash(np)
+                            save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reg (Hashed): {ne}", sha)
                             st.session_state['auth_msg'] = "ユーザー登録が完了しました。ログインしてください。"
                             st.rerun()
     st.stop()

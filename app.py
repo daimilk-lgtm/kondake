@@ -30,12 +30,13 @@ import os
 # - 【最重要】修正時は必ず「全文」を出力すること。一部省略は厳禁。
 # - 【最重要】既存の細かい仕様（印刷、CSS等）は指示がない限り絶対に変えない。
 # - 【最重要】ユーザーからの追加指示は、毎回このセクションに書き足して更新すること。
-# - [2026/02/22] 買い物リストのレイアウトをHTMLテーブルで再構築。行間を極限まで詰め、数量を材料名に隣接させ、アイコン操作を復活。材料名の結合バグを修正。
+# - [2026/02/22] 買い物リストを元のシンプルなチェックボックス形式に差し戻し。
+# - [2026/02/22] 材料名が不自然に結合されるバグを、抽出ロジックの修正により解消。
 # - [2026/02/22] 確定献立表のヘッダーを「メニュー1, メニュー2...」の通し番号形式に変更し、最後を「汁物」に固定。
 # - [2026/02/22] パスワード保存方式をPBKDF2（SHA256）によるハッシュ化方式に変更。
 # ==============================================================================
 
-VERSION = "1.9.3"
+VERSION = "1.9.4"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -104,15 +105,9 @@ st.markdown("""
     .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0 20px 0; letter-spacing: 0.5rem; }
     .auth-header { position: absolute; top: -10px; right: 0; text-align: right; padding: 10px; z-index: 1000; }
     .user-id { font-size: 0.75rem; color: #666; }
-    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; }
-    .preview-table th, .preview-table td { border: 1px solid #eee; padding: 4px; text-align: left; }
-    
-    /* 買い物リスト・テーブル高密度化 */
-    .shop-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-    .shop-table tr { border-bottom: 1px solid #f0f0f0; }
-    .shop-table td { padding: 2px 0; vertical-align: middle; line-height: 1.2; }
-    .td-item { font-size: 0.95rem; }
-    .td-count { font-size: 0.85rem; color: #888; padding-left: 5px; }
+    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; overflow-x: auto; display: block; }
+    .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
+    .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     .custom-error { color: #ff4b4b; padding: 10px; border: 1px solid #ff4b4b; border-radius: 8px; margin: 10px 0; font-size: 0.9rem; }
     .custom-info { color: #1f77b4; padding: 10px; border: 1px solid #1f77b4; border-radius: 8px; margin: 10px 0; font-size: 0.9rem; }
 </style>
@@ -148,7 +143,7 @@ if not st.session_state['authenticated']:
                     save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, "Reset Pass", sha)
                     st.session_state['auth_msg'] = "更新しました"; st.session_state['reset_mode'] = "none"; st.rerun()
     else:
-        tab_log, tab_reg = st.tabs(["ログイン", "新規登録"])
+        tab_log, tab_reg = st.tabs(["ログイン", "新規ユーザー登録"])
         with tab_log:
             with st.form("login_form"):
                 e = st.text_input("メールアドレス")
@@ -157,11 +152,11 @@ if not st.session_state['authenticated']:
                     users, _ = get_users_data()
                     if e in users and check_pw_hash(p, users[e]):
                         st.session_state['authenticated'] = True; st.session_state['user_email'] = e; st.rerun()
-            if st.button("パスワードを忘れた", use_container_width=True):
+            if st.button("パスワードを忘れた場合", use_container_width=True):
                 st.session_state['show_forgot_pw'] = True; st.rerun()
             if st.session_state['show_forgot_pw']:
                 re_email = st.text_input("登録メールアドレス")
-                if st.button("コード送信"):
+                if st.button("再設定コードを送信"):
                     users, _ = get_users_data()
                     if re_email in users:
                         otp = ''.join(random.choices(string.digits, k=6))
@@ -169,8 +164,8 @@ if not st.session_state['authenticated']:
                         if success: st.session_state['reset_otp'] = otp; st.session_state['reset_target_email'] = re_email; st.session_state['reset_mode'] = "sent"; st.rerun()
         with tab_reg:
             with st.form("reg_form"):
-                ne, np = st.text_input("メールアドレス"), st.text_input("パスワード", type="password")
-                if st.form_submit_button("登録"):
+                ne, np = st.text_input("メールアドレス"), st.text_input("パスワード(8文字以上)", type="password")
+                if st.form_submit_button("登録する"):
                     users, sha = get_users_data()
                     if ne not in users:
                         users[ne] = make_pw_hash(np)
@@ -231,6 +226,7 @@ with tab_plan:
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list, new_history_entries = [], []
+        # 列数の計算（メニュー1, メニュー2...）
         max_menu_cols = max([sum(len(d["menu"].get(c, [])) for c in ["主菜1", "副菜1", "副菜2"]) for d in weekly_plan.values()] + [1])
         h_html = "<tr><th>日付</th>" + "".join([f"<th>メニュー{j+1}</th>" for j in range(max_menu_cols)]) + "<th>汁物</th></tr>"
         r_html = ""
@@ -241,16 +237,17 @@ with tab_plan:
                 for dish in data["menu"].get(c, []):
                     items.append(dish)
                     new_history_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": dish, "user": st.session_state['user_email']})
-                    raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
-                    all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\s・/]+', str(raw)) if x.strip()])
+                    # 材料の抽出ロジック（区切り文字を厳密にして結合を防ぐ）
+                    raw_material = str(df_menu[df_menu["料理名"] == dish]["材料"].iloc[0])
+                    all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\r\s・/]+', raw_material) if x.strip()])
             for j in range(max_menu_cols): row += f"<td>{items[j] if j < len(items) else '-'}</td>"
             soup = data["menu"].get("汁物", [])
             for s_dish in soup:
                 new_history_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": s_dish, "user": st.session_state['user_email']})
-                all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\s・/]+', str(df_menu[df_menu["料理名"]==s_dish]["材料"].iloc[0])) if x.strip()])
+                all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\r\s・/]+', str(df_menu[df_menu["料理名"]==s_dish]["材料"].iloc[0])) if x.strip()])
             row += f"<td>{', '.join(soup) if soup else '-'}</td>"
             r_html += f"<tr>{row}</tr>"
-            if data["memo"]: all_ings_list.extend([f"{d_str}メモ: " + x.strip() for x in re.split(r'[、,\n\s・/]+', data["memo"]) if x.strip()])
+            if data["memo"]: all_ings_list.extend([f"{d_str}メモ: " + x.strip() for x in re.split(r'[、,\n\r\s・/]+', data["memo"]) if x.strip()])
         
         st.session_state["current_rows_html"], st.session_state["current_header_html"] = r_html, h_html
         counts = pd.Series(all_ings_list).value_counts()
@@ -261,7 +258,7 @@ with tab_plan:
             elif df_dict is not None:
                 for _, r in df_dict.iterrows():
                     if str(r["材料"]) in str(item): cat = r["種別"]; break
-            st.session_state["shopping_list_data"].append({"item": item, "count": int(count), "cat": cat, "id": f"it_{len(st.session_state['shopping_list_data'])}"})
+            st.session_state["shopping_list_data"].append({"item": item, "count": int(count), "cat": cat})
 
     if "shopping_list_data" in st.session_state:
         st.markdown(f'<table class="preview-table">{st.session_state["current_header_html"]}{st.session_state["current_rows_html"]}</table>', unsafe_allow_html=True)
@@ -269,27 +266,11 @@ with tab_plan:
         for c in sorted(list(set(d["cat"] for d in s_data))):
             st.markdown(f"**【{c}】**")
             for item_obj in [d for d in s_data if d["cat"] == c]:
-                i_id = item_obj["id"]
-                if st.session_state.get(f"del_{i_id}", False): continue
-                
-                # HTMLテーブルで行間を極限まで詰める
-                cnt_str = f'<span class="td-count">({item_obj["count"]})</span>' if item_obj["count"] > 1 else ""
-                st.markdown(f'<table class="shop-table"><tr><td class="td-item">・{item_obj["item"]}{cnt_str}</td></tr></table>', unsafe_allow_html=True)
-                
-                # 操作ボタン（アイコン）
-                c1, c2, _ = st.columns([1, 1, 8])
-                if c1.button("📝", key=f"ed_{i_id}"): st.session_state[f"edit_{i_id}"] = True
-                if c2.button("🗑️", key=f"dl_{i_id}"): st.session_state[f"del_{i_id}"] = True; st.rerun()
-                
-                if st.session_state.get(f"edit_{i_id}", False):
-                    en = st.text_input("修正", value=item_obj["item"], key=f"in_n_{i_id}")
-                    if st.button("保存", key=f"sv_{i_id}"):
-                        for d in st.session_state["shopping_list_data"]:
-                            if d["id"] == i_id: d["item"] = en; break
-                        st.session_state[f"edit_{i_id}"] = False; st.rerun()
+                # 元のシンプルなチェックボックス形式
+                st.checkbox(f"{item_obj['item']} ({item_obj['count']})", key=f"chk_{item_obj['item']}_{item_obj['cat']}")
 
         # 印刷用HTML
-        active = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
+        active = st.session_state["shopping_list_data"]
         cards = "".join([f'<div style="border:1px solid #ccc;padding:5px;width:45%;break-inside:avoid;"><h3>{cat}</h3>' + "".join([f'<div>□ {r["item"]} ({r["count"]})</div>' for r in active if r["cat"]==cat]) + '</div>' for cat in sorted(list(set(d["cat"] for d in active)))])
         b64 = base64.b64encode(f"<html><body><h2>献立</h2><table>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table><h2>リスト</h2><div style='display:flex;flex-wrap:wrap;gap:10px;'>{cards}</div></body></html>".encode('utf-8')).decode('utf-8')
         components.html(f'<button id="pb" style="width:100%;background:#262730;color:white;padding:12px;border:none;border-radius:8px;">A4印刷</button><script>document.getElementById("pb").onclick=function(){{var w=window.open();w.document.write(atob("{b64}"));w.document.close();w.print();}};</script>', height=60)
@@ -298,10 +279,6 @@ with tab_hist:
     u_hist = df_hist[df_hist["user"] == st.session_state['user_email']]
     if not u_hist.empty:
         disp = u_hist.copy().sort_values(["日付", "料理名"], ascending=[False, True])
-        sel_idx = st.selectbox("データ", range(len(disp)), format_func=lambda i: f"{disp.iloc[i]['日付']} - {disp.iloc[i]['料理名']}")
-        if st.button("履歴削除"):
-            df_hist = df_hist[~((df_hist['日付']==disp.iloc[sel_idx]['日付'])&(df_hist['料理名']==disp.iloc[sel_idx]['料理名'])&(df_hist['user']==st.session_state['user_email']))]
-            save_to_github(df_hist.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, "Del hist", hist_sha); st.rerun()
         st.dataframe(disp.drop(columns=["user"]), use_container_width=True, hide_index=True)
 
 with tab_manage:

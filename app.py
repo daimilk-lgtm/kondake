@@ -47,9 +47,10 @@ import os
 # - [2026/02/22] ログイン画面下部の表示バグに対し、標準expanderを廃止。
 # - [2026/02/22] 再設定フロー中の表示バグに対し、標準st.status/st.errorを廃止し、独自Markdown表示に切り替え。
 # - [2026/02/22] セキュリティ向上のため、パスワード保存方式をPBKDF2（SHA256）によるハッシュ化方式に変更。
+# - [2026/02/22] 確定献立表のヘッダーを「メニュー1, メニュー2...」の通し番号形式に変更し、最後を「汁物」に固定。
 # ==============================================================================
 
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -102,7 +103,7 @@ def save_to_github(content, filename, message, current_sha=None):
 
 def send_otp_email(to_email, otp):
     if not SMTP_USER or not SMTP_PASS:
-        return False, "SecretsにSMTP_USERまたはSMTP_PASSが設定されていません。"
+        return False, "SecretsにSMTP_USERまたはSMTP_PASS?が設定されていません。"
     
     msg = MIMEText(f"献だけ：パスワード再設定用のワンタイムパスコードは 【 {otp} 】 です。")
     msg["Subject"] = "【献だけ】パスワード再設定コード"
@@ -143,7 +144,6 @@ st.markdown("""
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     
-    /* エラー表示用カスタムスタイル */
     .custom-error {
         color: #ff4b4b;
         padding: 10px;
@@ -212,7 +212,6 @@ if not st.session_state['authenticated']:
                         st.markdown('<div class="custom-error">パスワードが一致しません</div>', unsafe_allow_html=True)
                     else:
                         users, sha = get_users_data()
-                        # ハッシュ化して保存
                         users[st.session_state['reset_target_email']] = make_pw_hash(new_p)
                         save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reset (Hashed): {st.session_state['reset_target_email']}", sha)
                         st.session_state['auth_msg'] = "パスワードを更新しました。ログインしてください。"
@@ -287,7 +286,6 @@ if not st.session_state['authenticated']:
                         if ne in users: 
                             st.markdown('<div class="custom-error">既に登録されているアドレスです</div>', unsafe_allow_html=True)
                         else:
-                            # ハッシュ化して保存
                             users[ne] = make_pw_hash(np)
                             save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reg (Hashed): {ne}", sha)
                             st.session_state['auth_msg'] = "ユーザー登録が完了しました。ログインしてください。"
@@ -368,31 +366,55 @@ with tab_plan:
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list = []
         new_history_entries = []
-        max_counts = {c: 1 for c in cats}
+        
+        # 最大カラム数の計算（汁物以外）
+        max_menu_cols = 0
         for d in weekly_plan.values():
-            for c in cats: max_counts[c] = max(max_counts[c], len(d["menu"].get(c, [])))
+            non_soup_count = sum(len(d["menu"].get(c, [])) for c in ["主菜1", "副菜1", "副菜2"])
+            max_menu_cols = max(max_menu_cols, non_soup_count)
+            
+        # ヘッダー生成
         header_html = "<tr><th>日付</th>"
-        for c in ["主菜1", "副菜1", "副菜2", "汁物"]:
-            for j in range(max_counts[c]): header_html += f"<th>{c}{f' {j+1}' if max_counts[c]>1 else ''}</th>"
-        header_html += "</tr>"
+        for j in range(max_menu_cols):
+            header_html += f"<th>メニュー{j+1}</th>"
+        header_html += "<th>汁物</th></tr>"
+        
+        # 行データ生成
         rows_html = ""
         for d_str, data in weekly_plan.items():
             row_content = f"<td>{d_str}({data['weekday']})</td>"
-            for c in ["主菜1", "副菜1", "副菜2", "汁物"]:
-                items = data["menu"].get(c, [])
-                for j in range(max_counts[c]): row_content += f"<td>{items[j] if j < len(items) else '-'}</td>"
+            
+            # 汁物以外のメニューを統合
+            non_soup_items = []
+            for c in ["主菜1", "副菜1", "副菜2"]:
+                non_soup_items.extend(data["menu"].get(c, []))
+            
+            # メニュー列の埋め込み
+            for j in range(max_menu_cols):
+                row_content += f"<td>{non_soup_items[j] if j < len(non_soup_items) else '-'}</td>"
+                
+            # 汁物列（最後）
+            soup_items = data["menu"].get("汁物", [])
+            row_content += f"<td>{', '.join(soup_items) if soup_items else '-'}</td>"
+            
             rows_html += f"<tr>{row_content}</tr>"
-            for dish_list in data["menu"].values():
+            
+            # 履歴・材料集計用
+            for cat_name, dish_list in data["menu"].items():
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": dish, "user": st.session_state['user_email']})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\s・/]+', str(ing_raw)) if x.strip()])
             if data["memo"]: all_ings_list.extend([f"{d_str}メモ: " + x.strip() for x in re.split(r'[、,\n\s・/]+', data["memo"]) if x.strip()])
+            
         for m_dish in selected_memos: all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\s・/]+', str(df_menu[df_menu["料理名"] == m_dish]["材料"].iloc[0])) if x.strip()])
+        
         if new_history_entries:
             df_combined_h = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
             save_to_github(df_combined_h.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, "Update history", hist_sha)
+        
         st.session_state["current_rows_html"], st.session_state["current_header_html"] = rows_html, header_html
+        
         counts = pd.Series(all_ings_list).value_counts()
         init_shopping = []
         for item, count in counts.items():

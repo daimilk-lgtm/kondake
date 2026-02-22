@@ -33,10 +33,10 @@ import re
 # - [2026/02/22] 確定献立はカテゴリーごとに列を分ける。同一カテゴリーに複数ある場合は複数列に分割し、汁物は必ず右端の列に配置する。
 # - [2026/02/22] 買い物リストの各項目を個別に編集・削除できる機能を、スマホで直感的に操作できるボタン形式で実装。
 # - [2026/02/22] 材料名が連結して表示される現象を修正（材料パースロジックの強化）。
-# - [2026/02/22] 買い物リストの数量変更等の編集時、設定済みのカテゴリーが勝手に「未分類」へ移動しないよう修正。
+# - [2026/02/22] 買い物リスト編集時、元のカテゴリーを自動で引き継ぎ、勝手に「未分類」へ移動しないよう修正。編集項目からカテゴリー選択を削除。
 # ==============================================================================
 
-VERSION = "1.4.4"
+VERSION = "1.4.5"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -229,7 +229,6 @@ with tab_plan:
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
-                    # 材料分割
                     splitted = re.split(r'[、,\n\s・/]+', str(ing_raw))
                     all_ings_list.extend([x.strip() for x in splitted if x.strip()])
             
@@ -270,11 +269,7 @@ with tab_plan:
 
         st.markdown("### 🛒 買い物リストの調整")
         
-        # 編集・削除管理用のセッション
         shopping_data = st.session_state["shopping_list_data"]
-        
-        # カテゴリーごとの表示と処理
-        final_list_for_display = []
         unique_cats = sorted(list(set(d["cat"] for d in shopping_data)))
         
         for cat in unique_cats:
@@ -283,8 +278,6 @@ with tab_plan:
             
             for item_obj in items_in_cat:
                 item_id = item_obj["id"]
-                
-                # 削除フラグ確認
                 if st.session_state.get(f"del_{item_id}", False):
                     continue
 
@@ -299,29 +292,22 @@ with tab_plan:
                     st.session_state[f"del_{item_id}"] = True
                     st.rerun()
 
-                # 編集フォーム（カテゴリー維持ロジック）
                 if st.session_state.get(f"editing_{item_id}", False):
                     with st.container():
                         st.markdown(f'<div class="edit-item-box">', unsafe_allow_html=True)
                         e_name = st.text_input("項目名", value=item_obj["item"], key=f"inp_name_{item_id}")
                         e_cnt = st.number_input("個数", value=int(item_obj["count"]), min_value=1, key=f"inp_cnt_{item_id}")
-                        cat_options = ["肉・魚", "野菜", "乳製品・卵", "加工食品", "調味料", "📝 各日メモ", "99未分類"]
-                        current_cat_idx = cat_options.index(item_obj["cat"]) if item_obj["cat"] in cat_options else 6
-                        e_cat = st.selectbox("カテゴリ", cat_options, index=current_cat_idx, key=f"inp_cat_{item_id}")
-                        
+                        # カテゴリーの編集項目は削除し、内部的に cat を引き継ぐ
                         if st.button("保存", key=f"save_{item_id}"):
-                            # セッションデータ内の実体を探して更新
                             for d in st.session_state["shopping_list_data"]:
                                 if d["id"] == item_id:
                                     d["item"] = e_name
                                     d["count"] = e_cnt
-                                    d["cat"] = e_cat # ここで選択されたカテゴリーを固定
+                                    # カテゴリー(d["cat"])は変更せず維持
                                     break
                             st.session_state[f"editing_{item_id}"] = False
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
-                
-                final_list_for_display.append(item_obj)
 
         # 最終印刷用HTML
         cards_html = ""

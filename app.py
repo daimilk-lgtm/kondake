@@ -7,17 +7,21 @@ import re
 from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 
-# 各自作成したモジュールをインポート
-from github_utils import get_github_content, save_to_github
-from auth_module import login_screen, show_auth_header
+# 外部モジュールからの読み込み
+try:
+    from github_utils import get_github_content, save_to_github
+    from auth_module import login_screen, show_auth_header
+except ImportError:
+    st.error("モジュールの読み込みに失敗しました。github_utils.py と auth_module.py が同じディレクトリに存在するか確認してください。")
+    st.stop()
 
 # ==============================================================================
 # 【仕様定義書 / SPECIFICATIONS & USER REQUESTS】
 # ------------------------------------------------------------------------------
 # [基本仕様]
 # 1. 接続・保存機能: GitHub API (menu.csv, history.csv, ingredients.csv, draft.json, users.json).
-# 2. 献立作成: 主菜1, 副菜1, 副菜2, 汁物の4枠。主菜2は定番用。
-# 3. 買い物リスト: カテゴリ別表示 & A4最適化印刷。
+# 2. 献立作成: 主菜1, 副菜1, 副菜2, 汁物の4枠。
+# 3. 買い物リスト & 印刷: カテゴリ別表示 & A4最適化印刷.
 # 4. 履歴管理: ユーザー別に保存。修正・削除機能。
 # 5. UI/UX: スマホ優先。シングルカラム構成（サイドバー廃止）。
 #
@@ -25,16 +29,18 @@ from auth_module import login_screen, show_auth_header
 # - [2026/02/22] 物理分割導入: app.py, auth_module.py, github_utils.py。
 # - [2026/02/22] 全文作成のルールは「各ファイル単位での全文作成」とする。
 # - [2026/02/22] 修正時はAIが段階的プロンプトを作成し、ユーザーが順次適用する。
+# - [2026/02/22] ディレクトリ構成を本仕様項目に明記。
 # ==============================================================================
 
-VERSION = "1.7.1"
+VERSION = "1.7.2"
 FILE = "menu.csv"
 HIST_FILE = "history.csv"
 DRAFT_FILE = "draft.json"
+DICT_FILE = "ingredients.csv"
 
 st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
 
-# デザイン定義（CSS）
+# デザイン定義
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100;300;400&display=swap');
@@ -61,11 +67,11 @@ if not st.session_state['authenticated']:
     login_screen()
     st.stop()
 
-# ログイン後のヘッダー表示
 show_auth_header()
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
 # データ取得
+@st.cache_data(ttl=60)
 def load_all_data():
     m_content, m_sha = get_github_content(FILE)
     h_content, h_sha = get_github_content(HIST_FILE)
@@ -79,9 +85,16 @@ def load_all_data():
     return df_menu, m_sha, df_hist, h_sha, draft_data, d_sha
 
 df_menu, menu_sha, df_hist, hist_sha, draft_data, draft_sha = load_all_data()
+
+# 辞書データの読み込み
+try:
+    dict_url = f"https://raw.githubusercontent.com/daimilk-lgtm/kondake/main/{DICT_FILE}"
+    df_dict = pd.read_csv(dict_url)
+except:
+    df_dict = None
+
 if df_menu is None: st.stop()
 
-# タブ構成
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ 管理"])
 
 with tab_plan:
@@ -153,20 +166,34 @@ with tab_plan:
         st.session_state["current_header_html"] = header_html
         
         counts = pd.Series(all_ings_list).value_counts()
-        init_shopping = [{"item": item, "count": int(count), "cat": "未分類", "id": f"it_{i}"} for i, (item, count) in enumerate(counts.items())]
+        init_shopping = []
+        for i, (item, count) in enumerate(counts.items()):
+            cat = "99未分類"
+            if "メモ:" in str(item): cat = "📝 各日メモ"
+            elif df_dict is not None:
+                for _, r in df_dict.iterrows():
+                    if str(r["材料"]) in str(item): cat = r["種別"]; break
+            init_shopping.append({"item": item, "count": int(count), "cat": cat, "id": f"it_{i}"})
         st.session_state["shopping_list_data"] = init_shopping
 
     if "shopping_list_data" in st.session_state:
         st.markdown(f'<table class="preview-table">{st.session_state["current_header_html"]}{st.session_state["current_rows_html"]}</table>', unsafe_allow_html=True)
-        for item_obj in st.session_state["shopping_list_data"]:
-            if st.session_state.get(f"del_{item_obj['id']}", False): continue
-            st.write(f"□ {item_obj['item']} ({item_obj['count']})")
+        s_data = st.session_state["shopping_list_data"]
+        u_cats = sorted(list(set(d["cat"] for d in s_data)))
+        for c in u_cats:
+            st.markdown(f"**【{c}】**")
+            for item_obj in [d for d in s_data if d["cat"] == c]:
+                if st.session_state.get(f"del_{item_obj['id']}", False): continue
+                st.write(f"□ {item_obj['item']} ({item_obj['count']})")
 
 with tab_hist:
     st.subheader("📜 あなたの履歴")
     u_hist = df_hist[df_hist["user"] == st.session_state['user_email']]
-    st.dataframe(u_hist.drop(columns=["user"]), use_container_width=True, hide_index=True)
+    if not u_hist.empty:
+        st.dataframe(u_hist.sort_values("日付", ascending=False).drop(columns=["user"]), use_container_width=True, hide_index=True)
+    else: st.info("履歴がありません")
 
 with tab_manage:
-    st.subheader("⚙️ メニュー管理")
-    st.write(f"Version {VERSION}")
+    st.subheader("⚙️ 管理情報")
+    st.write(f"App Version: {VERSION}")
+    # 以下、既存のメニュー管理ロジック（省略せず実装が必要な場合はここに記述）

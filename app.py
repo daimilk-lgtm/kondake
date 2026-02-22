@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.2.4"  # カテゴリ複数選択 & 操作性改善版
+VERSION = "1.2.5"  # 主菜2削除 & 定番アイテム改称版
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -85,7 +85,8 @@ if df_menu is None:
     st.error("データの読み込みに失敗しました。")
     st.stop()
 
-cats = ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]
+# --- 【修正】主菜2を削除 ---
+cats = ["主菜1", "副菜1", "副菜2", "汁物"]
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
 with tab_plan:
@@ -102,7 +103,6 @@ with tab_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with day_tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            # --- カテゴリを複数選択(multiselect)に変更 ---
             day_menu = {}
             for cat in cats:
                 options = df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist()
@@ -110,11 +110,10 @@ with tab_plan:
             
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
-    # メモ（リスト）
+    # --- 【修正】「定番アイテム」へ名称変更 ---
     list_options = df_menu[df_menu["カテゴリー"] == "主菜2"]["料理名"].tolist()
-    selected_memos = st.multiselect("メモ (リスト)", list_options, key="list_memo_multi", placeholder="選択してください")
+    selected_memos = st.multiselect("定番アイテム", list_options, key="list_memo_multi", placeholder="選択してください")
 
-    # フリーメモ
     memo = st.text_area("メモ", placeholder="買い物リストに追加したいもの...")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
@@ -125,11 +124,7 @@ with tab_plan:
             v = data["menu"]
             w_str = data["weekday"]
             
-            # 複数選択に対応した表示用テキストの作成
-            m1 = ", ".join(v.get('主菜1', [])) if v.get('主菜1') else "-"
-            m2 = ", ".join(v.get('主菜2', [])) if v.get('主菜2') else "-"
-            m_dish = f"{m1} / {m2}"
-            
+            m_dish = ", ".join(v.get('主菜1', [])) if v.get('主菜1') else "-"
             s1 = ", ".join(v.get('副菜1', [])) if v.get('副菜1') else "-"
             s2 = ", ".join(v.get('副菜2', [])) if v.get('副菜2') else "-"
             sw = ", ".join(v.get('汁物', [])) if v.get('汁物') else "-"
@@ -137,20 +132,18 @@ with tab_plan:
             
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m_dish}</td><td>{s_dish}</td></tr>'
             
-            # 各カテゴリのリスト内にある全料理の材料を抽出
             for dish_list in v.values():
                 for dish in dish_list:
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     items = str(ing_raw).replace("、", ",").split(",")
                     all_ings_list.extend([x.strip() for x in items if x.strip()])
 
-        # メモリストの材料反映
+        # 定番アイテムの材料反映
         for selected_dish in selected_memos:
             ing_raw_memo = df_menu[df_menu["料理名"] == selected_dish]["材料"].iloc[0]
             m_items = str(ing_raw_memo).replace("、", ",").split(",")
             all_ings_list.extend([x.strip() for x in m_items if x.strip()])
 
-        # フリーメモの処理
         if memo:
             memo_items = memo.replace("、", ",").replace("\n", ",").split(",")
             for m_item in memo_items:
@@ -163,71 +156,4 @@ with tab_plan:
                 category = "99未分類"
                 if df_dict is not None:
                     for _, row in df_dict.iterrows():
-                        if row["材料"] in item: category = row["種別"]; break
-                result_data.append({"name": f"{item} × {count}" if count > 1 else item, "cat": category})
-            
-            df_res = pd.DataFrame(result_data).sort_values("cat")
-            cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
-            
-            st.markdown("### 🛒 買い物リスト")
-            st.markdown(cards_html, unsafe_allow_html=True)
-
-            raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
-            b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
-
-            components.html(
-                f"""
-                <div style="margin-top:20px;">
-                    <button id="pbtn" style="width: 100%; background-color: #262730; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 1rem;">A4印刷する</button>
-                </div>
-                <script>
-                document.getElementById('pbtn').onclick = function() {{
-                    var html = atob('{b64_html}');
-                    var w = window.open('', '_blank');
-                    w.document.open();
-                    w.document.write(decodeURIComponent(escape(html)));
-                    w.document.close();
-                    setTimeout(function() {{ w.focus(); w.print(); }}, 500);
-                }};
-                </script>
-                """,
-                height=80,
-            )
-
-with tab_hist:
-    st.subheader("過去の履歴")
-    if not df_hist.empty:
-        st.dataframe(df_hist.sort_values("日付", ascending=False), use_container_width=True, hide_index=True)
-
-with tab_manage:
-    st.subheader("⚙️ メニュー管理")
-    edit_dish = st.selectbox("編集する料理を選んでください", ["選択してください"] + sorted(df_menu["料理名"].tolist()), placeholder="選択してください")
-    if edit_dish != "選択してください":
-        current_data = df_menu[df_menu["料理名"] == edit_dish].iloc[0]
-        with st.form("edit_form"):
-            new_n = st.text_input("料理名", value=current_data["料理名"])
-            c_val = current_data["カテゴリー"]
-            c_index = cats.index(c_val) if c_val in cats else 0
-            new_c = st.selectbox("カテゴリー", cats, index=c_index)
-            new_m = st.text_area("材料", value=current_data["材料"])
-            if st.form_submit_button("変更を保存"):
-                df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [new_n, new_c, new_m]
-                save_to_github(df_menu, FILE, f"Update {edit_dish}", menu_sha)
-                st.success("更新しました！")
-                st.cache_data.clear()
-                st.rerun()
-
-    st.divider()
-    with st.form("add_form"):
-        st.markdown("##### 新規メニューの追加")
-        n = st.text_input("料理名")
-        c = st.selectbox("カテゴリー", cats)
-        m = st.text_area("材料")
-        if st.form_submit_button("新規保存"):
-            if n and m:
-                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
-                save_to_github(new_df, FILE, f"Add {n}", menu_sha)
-                st.cache_data.clear()
-                st.rerun()
-
-    st.markdown(f'<div style="text-align: right; color: #ddd; font-size: 0.6rem; margin-top: 50px;">Version {VERSION}</div>', unsafe_allow_html=True)
+                        if row["材料"] in item

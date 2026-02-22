@@ -28,10 +28,11 @@ from datetime import datetime, timedelta
 # - [2026/02/22] 読み込み失敗時、エラーを握りつぶさずStatus Codeやレスポンス詳細を表示。
 # - [2026/02/22] 献立入力時、選択した曜日タブが勝手に切り替わらないよう操作性を維持する。
 # - [2026/02/22] GitHub上に「draft.json」を作成し、入力内容を共有可能にする。
-# - [2026/02/22] 上記一時保存用の実行ボタン名は「一時保存」とする。
+# - [2026/02/22] 一時保存用の実行ボタン名は「一時保存」とする。
+# - [2026/02/22] 確定献立の表を「主菜1」「副菜1」「副菜2」「汁物」の各1列ずつに分け、汁物を右端にする。
 # ==============================================================================
 
-VERSION = "1.3.9"
+VERSION = "1.4.0"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -101,8 +102,8 @@ st.markdown("""
     .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
     .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
     .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
-    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 10px; margin-bottom: 20px; }
-    .preview-table th, .preview-table td { border: 1px solid #eee; padding: 8px; text-align: left; }
+    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; }
+    .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
 </style>
 """, unsafe_allow_html=True)
@@ -198,12 +199,12 @@ with tab_plan:
             d_memo = data["memo"]
             
             m1 = ", ".join(v.get('主菜1', [])) if v.get('主菜1') else "-"
-            s1 = ", ".join(v.get('副菜1', [])) if v.get('副菜1') else "-"
-            s2 = ", ".join(v.get('副菜2', [])) if v.get('副菜2') else "-"
+            f1 = ", ".join(v.get('副菜1', [])) if v.get('副菜1') else "-"
+            f2 = ", ".join(v.get('副菜2', [])) if v.get('副菜2') else "-"
             sw = ", ".join(v.get('汁物', [])) if v.get('汁物') else "-"
-            s_dish = f"{s1}, {s2}, {sw}"
             
-            rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m1}</td><td>{s_dish}</td></tr>'
+            # カテゴリーごとに1列に揃えたHTML行を生成。汁物は右端。
+            rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m1}</td><td>{f1}</td><td>{f2}</td><td>{sw}</td></tr>'
             
             for dish_list in v.values():
                 for dish in dish_list:
@@ -225,7 +226,9 @@ with tab_plan:
             st.toast("履歴を保存しました")
 
         st.markdown("### 🗓 確定した献立")
-        st.markdown(f'<table class="preview-table"><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table>', unsafe_allow_html=True)
+        # テーブルヘッダーを修正
+        table_header = '<tr><th>日付</th><th>主菜1</th><th>副菜1</th><th>副菜2</th><th>汁物</th></tr>'
+        st.markdown(f'<table class="preview-table">{table_header}{rows_html}</table>', unsafe_allow_html=True)
 
         if all_ings_list:
             counts = pd.Series(all_ings_list).value_counts()
@@ -245,7 +248,19 @@ with tab_plan:
             st.markdown("### 🛒 買い物リスト")
             st.markdown(cards_html, unsafe_allow_html=True)
 
-            raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
+            # 印刷用HTMLも列分け構成に更新
+            raw_html = f"""
+            <html>
+            <body style='font-family:sans-serif;padding:20px;'>
+                <h2>🗓 献立</h2>
+                <table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>
+                    {table_header}{rows_html}
+                </table>
+                <h2>🛒 買い物リスト</h2>
+                {cards_html}
+            </body>
+            </html>
+            """
             b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
             components.html(f"""
                 <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷する</button></div>

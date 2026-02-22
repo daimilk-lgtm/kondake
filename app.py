@@ -11,6 +11,8 @@ import smtplib
 from email.mime.text import MIMEText
 import random
 import string
+import hashlib
+import os
 
 # ==============================================================================
 # 【仕様定義書 / SPECIFICATIONS & USER REQUESTS】
@@ -42,10 +44,12 @@ import string
 # - [2026/02/22] スマホログイン時の利便性向上のため、標準text_inputのautocomplete属性最適化と隠しフォームによるブラウザ支援を実装。
 # - [2026/02/22] Gmail SMTPサーバーを利用したパスワード再設定フロー（OTP送信方式）を実装。
 # - [2026/02/22] 印刷用HTMLの生成ロジックにおいて発生していたSyntaxErrorを、f-stringの修正により解消。
-# - [2026/02/22] ログイン画面下部のexpanderラベルに表示されていた「_arrow_right」等の表示バグを修正。
+# - [2026/02/22] ログイン画面下部の表示バグに対し、標準expanderを廃止。
+# - [2026/02/22] 再設定フロー中の表示バグに対し、標準st.status/st.errorを廃止し、独自Markdown表示に切り替え。
+# - [2026/02/22] セキュリティ向上のため、パスワード保存方式をPBKDF2（SHA256）によるハッシュ化方式に変更。
 # ==============================================================================
 
-VERSION = "1.7.9"
+VERSION = "1.9.0"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -59,6 +63,20 @@ TOKEN = st.secrets.get("GITHUB_TOKEN")
 # SMTP設定
 SMTP_USER = st.secrets.get("SMTP_USER")
 SMTP_PASS = st.secrets.get("SMTP_PASS")
+
+# パスワードハッシュ化関数
+def make_pw_hash(password, salt=None):
+    if salt is None:
+        salt = base64.b64encode(os.urandom(16)).decode('utf-8')
+    pw_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    return f"{salt}${base64.b64encode(pw_hash).decode('utf-8')}"
+
+def check_pw_hash(password, hash_str):
+    if "$" not in hash_str: # 旧平文パスワードとの互換性
+        return password == hash_str
+    salt, original_hash = hash_str.split("$")
+    new_hash = make_pw_hash(password, salt)
+    return new_hash == hash_str
 
 def get_github_content(filename):
     url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
@@ -124,6 +142,26 @@ st.markdown("""
     .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; overflow-x: auto; display: block; }
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
+    
+    /* エラー表示用カスタムスタイル */
+    .custom-error {
+        color: #ff4b4b;
+        padding: 10px;
+        border: 1px solid #ff4b4b;
+        border-radius: 8px;
+        margin: 10px 0;
+        font-size: 0.9rem;
+        background-color: #fffafa;
+    }
+    .custom-info {
+        color: #1f77b4;
+        padding: 10px;
+        border: 1px solid #1f77b4;
+        border-radius: 8px;
+        margin: 10px 0;
+        font-size: 0.9rem;
+        background-color: #f0f8ff;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -138,6 +176,10 @@ if 'reset_target_email' not in st.session_state:
     st.session_state['reset_target_email'] = ""
 if 'reset_otp' not in st.session_state:
     st.session_state['reset_otp'] = ""
+if 'show_forgot_pw' not in st.session_state:
+    st.session_state['show_forgot_pw'] = False
+if 'auth_msg' not in st.session_state:
+    st.session_state['auth_msg'] = ""
 
 def get_users_data():
     content, sha = get_github_content(USERS_FILE)
@@ -150,27 +192,33 @@ if not st.session_state['authenticated']:
     if st.session_state['reset_mode'] != "none":
         st.subheader("パスワードの再設定")
         if st.session_state['reset_mode'] == "sent":
-            st.info(f"{st.session_state['reset_target_email']} 宛にパスコードを送信しました。")
+            st.markdown(f'<div class="custom-info">{st.session_state["reset_target_email"]} 宛にパスコードを送信しました。</div>', unsafe_allow_html=True)
             otp_input = st.text_input("6桁のパスコードを入力", max_chars=6)
             if st.button("コードを確認", use_container_width=True):
                 if otp_input == st.session_state['reset_otp']:
                     st.session_state['reset_mode'] = "verified"
                     st.rerun()
-                else: st.error("パスコードが一致しません")
+                else: 
+                    st.markdown('<div class="custom-error">パスコードが一致しません</div>', unsafe_allow_html=True)
         
         elif st.session_state['reset_mode'] == "verified":
             with st.form("new_pass_form"):
                 new_p = st.text_input("新しいパスワード", type="password")
                 new_p_c = st.text_input("新しいパスワード（確認）", type="password")
                 if st.form_submit_button("パスワードを更新", use_container_width=True):
-                    if not re.match(r'^[a-zA-Z0-9]{8,}$', new_p): st.error("8文字以上の英数字で入力してください")
-                    elif new_p != new_p_c: st.error("パスワードが一致しません")
+                    if not re.match(r'^[a-zA-Z0-9]{8,}$', new_p): 
+                        st.markdown('<div class="custom-error">8文字以上の英数字で入力してください</div>', unsafe_allow_html=True)
+                    elif new_p != new_p_c: 
+                        st.markdown('<div class="custom-error">パスワードが一致しません</div>', unsafe_allow_html=True)
                     else:
                         users, sha = get_users_data()
-                        users[st.session_state['reset_target_email']] = new_p
-                        save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reset: {st.session_state['reset_target_email']}", sha)
-                        st.success("更新完了。新しいパスワードでログインしてください。")
+                        # ハッシュ化して保存
+                        users[st.session_state['reset_target_email']] = make_pw_hash(new_p)
+                        save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reset (Hashed): {st.session_state['reset_target_email']}", sha)
+                        st.session_state['auth_msg'] = "パスワードを更新しました。ログインしてください。"
                         st.session_state['reset_mode'] = "none"
+                        st.session_state['show_forgot_pw'] = False
+                        st.rerun()
         
         if st.button("キャンセル"):
             st.session_state['reset_mode'] = "none"
@@ -178,23 +226,34 @@ if not st.session_state['authenticated']:
     else:
         tab_log, tab_reg = st.tabs(["ログイン", "新規ユーザー登録"])
         with tab_log:
+            if st.session_state['auth_msg']:
+                st.markdown(f'<div class="custom-info">{st.session_state["auth_msg"]}</div>', unsafe_allow_html=True)
+                
             components.html("""<form style="display:none;"><input type="text" name="username" autocomplete="username"><input type="password" name="password" autocomplete="current-password"></form>""", height=0)
             with st.form("login_form"):
                 e = st.text_input("メールアドレス", key="l_email", autocomplete="username")
                 p = st.text_input("パスワード", type="password", key="l_pass", autocomplete="current-password")
                 if st.form_submit_button("ログイン", use_container_width=True):
                     users, _ = get_users_data()
-                    if e in users and users[e] == p:
+                    if e in users and check_pw_hash(p, users[e]):
                         st.session_state['authenticated'] = True
                         st.session_state['user_email'] = e
+                        st.session_state['auth_msg'] = ""
                         st.rerun()
-                    else: st.error("認証に失敗しました")
+                    else: 
+                        st.markdown('<div class="custom-error">認証に失敗しました</div>', unsafe_allow_html=True)
             
-            # 修正箇所: 画像の表示バグ(文字重なり)を回避するため、シンプルなテキストラベルに変更
-            with st.expander("パスワードを忘れた場合"):
-                re_email = st.text_input("登録メールアドレス", key="re_email_input")
-                if st.button("再設定コードを送信", type="primary", use_container_width=True):
-                    with st.status("送信処理中...") as status:
+            if not st.session_state['show_forgot_pw']:
+                if st.button("パスワードを忘れた場合", key="toggle_forgot_pw", type="secondary", use_container_width=True):
+                    st.session_state['show_forgot_pw'] = True
+                    st.rerun()
+            else:
+                st.markdown("---")
+                st.markdown("##### パスワード再設定コードの送信")
+                re_email = st.text_input("登録メールアドレスを入力", key="re_email_input")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("再設定コードを送信", type="primary", use_container_width=True):
                         users, _ = get_users_data()
                         if re_email in users:
                             otp = ''.join(random.choices(string.digits, k=6))
@@ -203,14 +262,15 @@ if not st.session_state['authenticated']:
                                 st.session_state['reset_otp'] = otp
                                 st.session_state['reset_target_email'] = re_email
                                 st.session_state['reset_mode'] = "sent"
-                                status.update(label="送信成功！", state="complete")
                                 st.rerun()
                             else:
-                                status.update(label="送信失敗", state="error")
-                                st.error(f"詳細エラー: {msg}")
+                                st.markdown(f'<div class="custom-error">送信失敗: {msg}</div>', unsafe_allow_html=True)
                         else:
-                            status.update(label="未登録アドレス", state="error")
-                            st.error("登録されていないメールアドレスです")
+                            st.markdown('<div class="custom-error">登録されていないメールアドレスです</div>', unsafe_allow_html=True)
+                with c2:
+                    if st.button("ログインに戻る", use_container_width=True):
+                        st.session_state['show_forgot_pw'] = False
+                        st.rerun()
         
         with tab_reg:
             with st.form("reg_form"):
@@ -218,15 +278,20 @@ if not st.session_state['authenticated']:
                 np = st.text_input("パスワード（8文字以上）", type="password", key="r_pass", autocomplete="new-password")
                 cp = st.text_input("確認用", type="password", key="r_conf", autocomplete="new-password")
                 if st.form_submit_button("登録する", use_container_width=True):
-                    if not re.match(r'^[a-zA-Z0-9]{8,}$', np): st.error("パスワード条件を満たしていません")
-                    elif np != cp: st.error("パスワードが一致しません")
+                    if not re.match(r'^[a-zA-Z0-9]{8,}$', np): 
+                        st.markdown('<div class="custom-error">パスワード条件を満たしていません</div>', unsafe_allow_html=True)
+                    elif np != cp: 
+                        st.markdown('<div class="custom-error">パスワードが一致しません</div>', unsafe_allow_html=True)
                     else:
                         users, sha = get_users_data()
-                        if ne in users: st.error("登録済みです")
+                        if ne in users: 
+                            st.markdown('<div class="custom-error">既に登録されているアドレスです</div>', unsafe_allow_html=True)
                         else:
-                            users[ne] = np
-                            save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reg: {ne}", sha)
-                            st.success("登録完了。")
+                            # ハッシュ化して保存
+                            users[ne] = make_pw_hash(np)
+                            save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reg (Hashed): {ne}", sha)
+                            st.session_state['auth_msg'] = "ユーザー登録が完了しました。ログインしてください。"
+                            st.rerun()
     st.stop()
 
 # --- 4. メインコンテンツ ---

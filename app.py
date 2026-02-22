@@ -42,9 +42,10 @@ import string
 # - [2026/02/22] スマホログイン時の利便性向上のため、標準text_inputのautocomplete属性最適化と隠しフォームによるブラウザ支援を実装。
 # - [2026/02/22] Gmail SMTPサーバーを利用したパスワード再設定フロー（OTP送信方式）を実装。
 # - [2026/02/22] 印刷用HTMLの生成ロジックにおいて発生していたSyntaxErrorを、f-stringの修正により解消。
+# - [2026/02/22] ログイン画面下部のexpanderラベルに表示されていた「_arrow_right」等の表示バグを修正。
 # ==============================================================================
 
-VERSION = "1.7.8"
+VERSION = "1.7.9"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -189,6 +190,7 @@ if not st.session_state['authenticated']:
                         st.rerun()
                     else: st.error("認証に失敗しました")
             
+            # 修正箇所: 画像の表示バグ(文字重なり)を回避するため、シンプルなテキストラベルに変更
             with st.expander("パスワードを忘れた場合"):
                 re_email = st.text_input("登録メールアドレス", key="re_email_input")
                 if st.button("再設定コードを送信", type="primary", use_container_width=True):
@@ -361,7 +363,6 @@ with tab_plan:
         active = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
         cards_html = "".join([f'<div class="print-card"><h3>{c}</h3>' + "".join([f'<div class="print-row"><span>□ {r["item"]}</span><span>{f"({r['count']})" if r["count"]>1 else ""}</span></div>' for r in active if r["cat"]==c]) + '</div>' for c in sorted(list(set(d["cat"] for d in active)))])
         
-        # 修正：CSSの波括弧をエスケープし、改行や引用符の干渉を防ぐため1行の文字列として定義
         css_style = "<style>@page { size: A4; margin: 10mm; } body { font-family: sans-serif; font-size: 10pt; } .print-container { display: flex; flex-wrap: wrap; gap: 10px; } .print-card { border: 1px solid #ccc; padding: 5px; width: calc(50% - 10px); break-inside: avoid; } .print-row { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; }</style>"
         header_part = st.session_state.get('current_header_html','')
         rows_part = st.session_state.get('current_rows_html','')

@@ -31,11 +31,10 @@ except ImportError:
 # - [2026/02/22] 買い物リストの個別編集・削除・数量・A4印刷仕様を完全復元。
 # - [2026/02/22] 全文作成のルールは「各ファイル単位での全文作成」とする。
 # - [2026/02/22] 修正時はAIが段階的プロンプトを作成し、ユーザーが順次適用する。
-# - [2026/02/22] 買い物リストの名称を「買い物リスト」に統一。
-# - [2026/02/22] 狭い画面でも買い物リストの行が縦に割れないよう、CSSとレイアウトを最適化。
+# - [2026/02/22] 狭い画面でも買い物リストが縦に割れないよう、CSSを強力な!important制約に更新。
 # ==============================================================================
 
-VERSION = "1.7.4"
+VERSION = "1.7.5"
 FILE = "menu.csv"
 HIST_FILE = "history.csv"
 DRAFT_FILE = "draft.json"
@@ -60,17 +59,22 @@ st.markdown("""
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     .edit-item-box { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; margin: 5px 0; }
     
-    /* 買い物リストの行が縦に割れないための制約 */
+    /* 買い物リストの強制横並び設定 (強力版) */
     [data-testid="column"] {
-        min-width: 0px !important;
-        flex-basis: auto !important;
+        flex: 0 1 auto !important;
+        min-width: fit-content !important;
     }
-    .shopping-row-container {
-        display: flex;
-        align-items: center;
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 5px;
-        margin-bottom: 2px;
+        align-items: center !important;
+        gap: 0.5rem !important;
+    }
+    /* ボタンの余白調整 */
+    div[data-testid="stHorizontalBlock"] button {
+        padding: 0px 5px !important;
+        min-height: 30px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -205,7 +209,7 @@ with tab_plan:
                 i_id = item_obj["id"]
                 if st.session_state.get(f"del_{i_id}", False): continue
                 
-                # 横並びを維持するためのコンテナ（カラム比率調整）
+                # 強制横並び用カラム設定
                 c1, c2, c3, c4 = st.columns([6, 1, 1, 1])
                 c1.markdown(f"□ {item_obj['item']}")
                 c2.markdown(f"{item_obj['count']}" if item_obj['count'] > 1 else "")

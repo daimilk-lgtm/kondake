@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.2.7"
+VERSION = "1.2.8"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -38,6 +38,7 @@ def get_history_data():
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             df_h = pd.read_csv(io.StringIO(raw))
+            if "uid" in df_h.columns: df_h = df_h.drop(columns=["uid"])
             return df_h, r.json()["sha"]
     except: pass
     return pd.DataFrame(columns=["日付", "曜日", "料理名"]), None
@@ -156,7 +157,7 @@ with tab_plan:
                 category = "99未分類"
                 if df_dict is not None:
                     for _, row in df_dict.iterrows():
-                        if row["材料"] in item: category = row["種別"]; break
+                        if str(row["材料"]) in str(item): category = row["種別"]; break
                 result_data.append({"name": f"{item} × {count}" if count > 1 else item, "cat": category})
             
             df_res = pd.DataFrame(result_data).sort_values("cat")
@@ -164,7 +165,6 @@ with tab_plan:
             st.markdown("### 🛒 買い物リスト")
             st.markdown(cards_html, unsafe_allow_html=True)
 
-            # 印刷用構築
             raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
             b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
             components.html(f"""
@@ -180,9 +180,34 @@ with tab_plan:
             """, height=80)
 
 with tab_hist:
-    st.subheader("過去の履歴")
+    st.subheader("📜 履歴の管理")
     if not df_hist.empty:
-        st.dataframe(df_hist.sort_values("日付", ascending=False), use_container_width=True, hide_index=True)
+        df_hist_display = df_hist.copy().sort_values("日付", ascending=False)
+        selected_hist_idx = st.selectbox("修正・削除するデータを選択", range(len(df_hist_display)), format_func=lambda i: f"{df_hist_display.iloc[i]['日付']} - {df_hist_display.iloc[i]['料理名']}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("選択した履歴を削除", type="secondary", use_container_width=True):
+                target_date = df_hist_display.iloc[selected_hist_idx]['日付']
+                target_name = df_hist_display.iloc[selected_hist_idx]['料理名']
+                df_hist = df_hist[~((df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name))]
+                save_to_github(df_hist, HIST_FILE, f"Delete history {target_date}", hist_sha)
+                st.cache_data.clear()
+                st.rerun()
+        with col2:
+            new_hist_name = st.text_input("料理名を修正", value=df_hist_display.iloc[selected_hist_idx]['料理名'])
+            if st.button("料理名を修正して保存", type="primary", use_container_width=True):
+                target_date = df_hist_display.iloc[selected_hist_idx]['日付']
+                target_name = df_hist_display.iloc[selected_hist_idx]['料理名']
+                df_hist.loc[(df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name), '料理名'] = new_hist_name
+                save_to_github(df_hist, HIST_FILE, f"Edit history {target_date}", hist_sha)
+                st.cache_data.clear()
+                st.rerun()
+        
+        st.divider()
+        st.dataframe(df_hist_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("履歴がありません。")
 
 with tab_manage:
     st.subheader("⚙️ メニュー管理")
@@ -211,3 +236,5 @@ with tab_manage:
                 save_to_github(new_df, FILE, f"Add {n}", menu_sha)
                 st.cache_data.clear()
                 st.rerun()
+
+    st.markdown(f'<div style="text-align: right; color: #ddd; font-size: 0.6rem; margin-top: 50px;">Version {VERSION}</div>', unsafe_allow_html=True)

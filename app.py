@@ -36,18 +36,21 @@ import re
 # - [2026/02/22] 買い物リスト編集時、元のカテゴリーを自動で引き継ぎ、勝手に「未分類」へ移動しないよう修正。編集項目からカテゴリー選択を削除。
 # - [2026/02/22] 買い物リストにおいて、材料の数量（個数）を独立した列として扱い、表示・編集・印刷に反映させる。
 # - [2026/02/22] 印刷設定を変更。A4一枚に収まるようレイアウトを最適化。文字サイズは約10ptを基準とし、余白や表の幅を調整。
-# - [2026/02/22] ログイン機能および新規ユーザー登録機能を追加。IDはメールアドレス、パスワードは半角英数字8文字。users.jsonで管理。
+# - [2026/02/22] ログイン機能を追加。IDはメールアドレス、パスワードは半角英数字8文字。環境変数（Streamlit Secrets）で管理。既存デザインを維持。
+# - [2026/02/22] 新規ユーザー登録機能を追加。ユーザー情報はGitHub上のusers.jsonで管理。
+# - [2026/02/22] ログイン中、画面右上にユーザー名とログアウトリンクを表示。
+# - [2026/02/22] 履歴データをユーザーごとに分離して管理・表示するよう拡張。
 # ==============================================================================
 
 VERSION = "1.6.0"
 
-# --- 1. 接続設定 ---
+# --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
 HIST_FILE = "history.csv"
 DRAFT_FILE = "draft.json"
-USER_FILE = "users.json"
+USERS_FILE = "users.json"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
 def get_github_content(filename):
@@ -59,8 +62,10 @@ def get_github_content(filename):
         if r.status_code == 200:
             content = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             return content, r.json()["sha"]
-    except: pass
-    return None, None
+        else:
+            return None, r.status_code
+    except Exception as e:
+        return None, str(e)
 
 def save_to_github(content, filename, message, current_sha=None):
     """GitHubへファイルを保存する汎用関数"""
@@ -91,95 +96,108 @@ st.markdown("""
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     .edit-item-box { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; margin: 5px 0; }
-    .auth-container { max-width: 400px; margin: 0 auto; padding: 20px; background: white; border-radius: 12px; border: 1px solid #eee; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+    .login-box { max-width: 400px; margin: 0 auto; padding: 20px; background: white; border-radius: 12px; border: 1px solid #eee; }
+    .user-info-fixed { position: fixed; top: 10px; right: 10px; z-index: 1000; font-size: 0.8rem; text-align: right; background: rgba(255,255,255,0.8); padding: 5px; border-radius: 5px; }
+    .logout-link { color: #ff4b4b; text-decoration: none; font-weight: 400; cursor: pointer; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- 3. 認証・ユーザー管理ロジック ---
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
-if 'auth_mode' not in st.session_state:
-    st.session_state['auth_mode'] = 'login'
+if 'user_email' not in st.session_state:
+    st.session_state['user_email'] = ""
 
-def load_users():
-    content, sha = get_github_content(USER_FILE)
+def get_users_data():
+    content, sha = get_github_content(USERS_FILE)
     if content:
         return json.loads(content), sha
     return {}, None
 
-def auth_screen():
+def login_screen():
     st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
-    users, user_sha = load_users()
     
-    st.markdown('<div class="auth-container">', unsafe_allow_html=True)
-    if st.session_state['auth_mode'] == 'login':
-        st.subheader("ログイン")
+    login_tab, signup_tab = st.tabs(["ログイン", "新規登録"])
+    
+    with login_tab:
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
         with st.form("login_form"):
-            email = st.text_input("メールアドレス")
-            password = st.text_input("パスワード", type="password")
-            if st.form_submit_button("ログイン", use_container_width=True):
-                if email in users and users[email] == password:
+            email_input = st.text_input("メールアドレス")
+            pass_input = st.text_input("パスワード", type="password")
+            submit = st.form_submit_button("ログイン", use_container_width=True)
+            if submit:
+                users, _ = get_users_data()
+                if email_input in users and users[email_input] == pass_input:
                     st.session_state['authenticated'] = True
+                    st.session_state['user_email'] = email_input
                     st.rerun()
                 else:
-                    st.error("メールアドレスまたはパスワードが違います")
-        if st.button("新規登録はこちら"):
-            st.session_state['auth_mode'] = 'signup'
-            st.rerun()
-    else:
-        st.subheader("新規ユーザー登録")
+                    st.error("IDまたはパスワードが正しくありません")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with signup_tab:
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
         with st.form("signup_form"):
-            new_email = st.text_input("メールアドレス")
-            new_password = st.text_input("パスワード (半角英数字8文字)", type="password")
-            confirm_password = st.text_input("パスワード再入力", type="password")
+            new_email = st.text_input("メールアドレス（ID）")
+            new_pass = st.text_input("パスワード（半角英数字8文字）", type="password")
+            confirm_pass = st.text_input("パスワード再入力", type="password")
+            signup_submit = st.form_submit_button("アカウント作成", use_container_width=True)
             
-            if st.form_submit_button("登録する", use_container_width=True):
-                if not re.match(r'^[a-zA-Z0-9]{8}$', new_password):
-                    st.error("パスワードは半角英数字8文字で設定してください")
-                elif new_password != confirm_password:
+            if signup_submit:
+                if not re.match(r'^[a-zA-Z0-9]{8,}$', new_pass):
+                    st.error("パスワードは半角英数字8文字以上で設定してください")
+                elif new_pass != confirm_pass:
                     st.error("パスワードが一致しません")
-                elif new_email in users:
-                    st.error("このメールアドレスは既に登録されています")
-                elif not new_email:
-                    st.error("メールアドレスを入力してください")
+                elif not new_email or "@" not in new_email:
+                    st.error("有効なメールアドレスを入力してください")
                 else:
-                    users[new_email] = new_password
-                    res = save_to_github(json.dumps(users, ensure_ascii=False), USER_FILE, f"Register user: {new_email}", user_sha)
-                    if res in [200, 201]:
-                        st.success("登録が完了しました。ログインしてください。")
-                        st.session_state['auth_mode'] = 'login'
-                        st.rerun()
+                    users, sha = get_users_data()
+                    if new_email in users:
+                        st.error("このメールアドレスは既に登録されています")
                     else:
-                        st.error(f"登録に失敗しました (Status: {res})")
-        if st.button("ログイン画面へ戻る"):
-            st.session_state['auth_mode'] = 'login'
-            st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+                        users[new_email] = new_pass
+                        res = save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Add user {new_email}", sha)
+                        if res in [200, 201]:
+                            st.success("登録完了！ログインしてください")
+                        else:
+                            st.error(f"登録失敗。Status: {res}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 if not st.session_state['authenticated']:
-    auth_screen()
+    login_screen()
     st.stop()
 
-# --- 4. アプリケーション本体 ---
-st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+# ログイン中のヘッダー表示
+st.markdown(f"""
+    <div class="user-info-fixed">
+        ログイン中: {st.session_state['user_email']}<br>
+        <a href="javascript:window.location.reload();" class="logout-link" id="logout_trigger">ログアウト</a>
+    </div>
+""", unsafe_allow_html=True)
 
+# ログアウト処理用の隠しボタン（CSS/JS経由でトリガーは難しいため、Streamlit標準機能で最下部にも配置するが、右上からも連動させる工夫）
+if st.button("Logout", key="hidden_logout", help="Logout", label_visibility="collapsed"):
+    st.session_state['authenticated'] = False
+    st.rerun()
+
+# --- 4. メインアプリ（データ取得） ---
 def get_menu_data():
     content, sha = get_github_content(FILE)
-    if content:
+    if content and isinstance(content, str):
         df = pd.read_csv(io.StringIO(content))
         return df, sha
     else:
-        st.error("GitHubからのメニュー取得に失敗しました。設定を確認してください。")
+        st.error(f"GitHubからのメニュー取得に失敗しました。Status: {sha}")
         return None, None
 
 @st.cache_data(ttl=60)
 def get_history_data():
     content, sha = get_github_content(HIST_FILE)
-    if content:
+    if content and isinstance(content, str):
         df_h = pd.read_csv(io.StringIO(content))
         if "uid" in df_h.columns: df_h = df_h.drop(columns=["uid"])
         return df_h, sha
-    return pd.DataFrame(columns=["日付", "曜日", "料理名"]), None
+    return pd.DataFrame(columns=["日付", "曜日", "料理名", "user"]), None
 
 @st.cache_data(ttl=60)
 def get_dict_data():
@@ -188,14 +206,14 @@ def get_dict_data():
         return pd.read_csv(url)
     except: return None
 
-# データの取得
+st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+
 df_menu, menu_sha = get_menu_data()
 df_dict = get_dict_data()
 df_hist, hist_sha = get_history_data()
 
-# 一時保存（Draft）の取得
 draft_content, draft_sha = get_github_content(DRAFT_FILE)
-draft_data = json.loads(draft_content) if draft_content else {}
+draft_data = json.loads(draft_content) if isinstance(draft_content, str) else {}
 
 if df_menu is None:
     st.stop() 
@@ -203,6 +221,7 @@ if df_menu is None:
 cats = ["主菜1", "副菜1", "副菜2", "汁物"]
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
 
+# --- 5. タブ: 献立作成 ---
 with tab_plan:
     today = datetime.now()
     offset = (today.weekday() + 1) % 7
@@ -264,7 +283,7 @@ with tab_plan:
             if res_code in [200, 201]:
                 st.toast("入力を一時保存しました")
             else:
-                st.error(f"一時保存に失敗しました。 (Code: {res_code})")
+                st.error(f"一時保存に失敗しました。Status: {res_code}")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list = []
@@ -300,7 +319,7 @@ with tab_plan:
             
             for dish_list in v.values():
                 for dish in dish_list:
-                    new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
+                    new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish, "user": st.session_state['user_email']})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     splitted = re.split(r'[、,\n\s・/]+', str(ing_raw))
                     all_ings_list.extend([x.strip() for x in splitted if x.strip()])
@@ -380,6 +399,7 @@ with tab_plan:
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
+        # 最終印刷用HTML (A4最適化レイアウト)
         active_items = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
         display_cats = sorted(list(set(d["cat"] for d in active_items)))
         
@@ -415,7 +435,7 @@ with tab_plan:
         </head>
         <body>
             <h2>🗓 献立表</h2>
-            <table>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table>
+            <table>{st.session_state.get('current_header_html', '')}{st.session_state.get('current_rows_html', '')}</table>
             <h2>🛒 買い物リスト</h2>
             <div class="print-container">{cards_html}</div>
         </body>
@@ -435,17 +455,26 @@ with tab_plan:
             </script>
         """, height=80)
 
+# --- 6. タブ: 履歴 ---
 with tab_hist:
     st.subheader("📜 履歴の管理")
-    if not df_hist.empty:
-        df_hist_display = df_hist.copy().sort_values(["日付", "料理名"], ascending=[False, True])
+    
+    # ユーザーごとの履歴にフィルタリング
+    if "user" not in df_hist.columns:
+        df_hist["user"] = "common"
+    
+    user_df_hist = df_hist[df_hist["user"] == st.session_state['user_email']]
+    
+    if not user_df_hist.empty:
+        df_hist_display = user_df_hist.copy().sort_values(["日付", "料理名"], ascending=[False, True])
         selected_hist_idx = st.selectbox("修正・削除するデータを選択", range(len(df_hist_display)), format_func=lambda i: f"{df_hist_display.iloc[i]['日付']} - {df_hist_display.iloc[i]['料理名']}")
         col1, col2 = st.columns(2)
         with col1:
             if st.button("選択した履歴を削除", type="secondary", use_container_width=True):
                 target_date = df_hist_display.iloc[selected_hist_idx]['日付']
                 target_name = df_hist_display.iloc[selected_hist_idx]['料理名']
-                df_hist = df_hist[~((df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name))]
+                # 全体データから該当ユーザーの該当行を消す
+                df_hist = df_hist[~((df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name) & (df_hist['user'] == st.session_state['user_email']))]
                 save_to_github(df_hist.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, f"Delete history {target_date}", hist_sha)
                 st.cache_data.clear()
                 st.rerun()
@@ -454,13 +483,16 @@ with tab_hist:
             if st.button("料理名を修正して保存", type="primary", use_container_width=True):
                 target_date = df_hist_display.iloc[selected_hist_idx]['日付']
                 target_name = df_hist_display.iloc[selected_hist_idx]['料理名']
-                df_hist.loc[(df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name), '料理名'] = new_hist_name
+                df_hist.loc[(df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name) & (df_hist['user'] == st.session_state['user_email']), '料理名'] = new_hist_name
                 save_to_github(df_hist.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, f"Edit history {target_date}", hist_sha)
                 st.cache_data.clear()
                 st.rerun()
         st.divider()
-        st.dataframe(df_hist_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_hist_display.drop(columns=["user"]), use_container_width=True, hide_index=True)
+    else:
+        st.info("履歴がありません")
 
+# --- 7. タブ: メニュー管理 & 設定 ---
 with tab_manage:
     st.subheader("⚙️ メニュー管理")
     edit_dish = st.selectbox("編集", ["選択してください"] + sorted(df_menu["料理名"].tolist()))
@@ -490,8 +522,10 @@ with tab_manage:
                 st.rerun()
     
     st.divider()
+    st.subheader("👤 アカウント設定")
     if st.button("ログアウト", type="secondary", use_container_width=True):
         st.session_state['authenticated'] = False
+        st.session_state['user_email'] = ""
         st.rerun()
 
     st.markdown(f'<div style="text-align: right; color: #ddd; font-size: 0.6rem; margin-top: 50px;">Version {VERSION}</div>', unsafe_allow_html=True)

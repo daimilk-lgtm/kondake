@@ -30,9 +30,11 @@ from datetime import datetime, timedelta
 # - [2026/02/22] GitHub上に「draft.json」を作成し、入力内容を共有可能にする。
 # - [2026/02/22] 一時保存用の実行ボタン名は「一時保存」とする。
 # - [2026/02/22] 確定献立はカテゴリーごとに列を分ける。同一カテゴリーに複数ある場合は複数列に分割し、汁物は必ず右端の列に配置する。
+# - [2026/02/22] 買い物リストの各項目を個別に編集・削除できる機能を追加。
+# - [2026/02/22] 材料名が連結して表示される現象を修正（パース処理の強化）。
 # ==============================================================================
 
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -192,13 +194,11 @@ with tab_plan:
         all_ings_list = []
         new_history_entries = []
         
-        # 動的な列数を計算（最大値を取得）
         max_counts = {"主菜1": 1, "副菜1": 1, "副菜2": 1, "汁物": 1}
         for d_str, data in weekly_plan.items():
             for cat in cats:
                 max_counts[cat] = max(max_counts[cat], len(data["menu"].get(cat, [])))
 
-        # テーブルヘッダーの生成
         header_html = "<tr><th>日付</th>"
         for cat in ["主菜1", "副菜1", "副菜2"]:
             for j in range(max_counts[cat]):
@@ -214,79 +214,111 @@ with tab_plan:
             v = data["menu"]
             w_str = data["weekday"]
             d_memo = data["memo"]
-            
             row_content = f"<td>{d_str}({w_str})</td>"
-            
-            # 各カテゴリーのセルを生成
             for cat in ["主菜1", "副菜1", "副菜2", "汁物"]:
                 items = v.get(cat, [])
                 for j in range(max_counts[cat]):
                     cell_val = items[j] if j < len(items) else "-"
                     row_content += f"<td>{cell_val}</td>"
-            
             rows_html += f"<tr>{row_content}</tr>"
             
-            # 履歴と材料の処理
             for dish_list in v.values():
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
-                    all_ings_list.extend([x.strip() for x in str(ing_raw).replace("、", ",").split(",") if x.strip()])
+                    # 材料名の分割ロジックを修正
+                    splitted = str(ing_raw).replace("、", ",").replace("\n", ",").split(",")
+                    all_ings_list.extend([x.strip() for x in splitted if x.strip()])
             
             if d_memo:
                 memo_prefix = f"{d_str}({w_str}) メモ: "
-                all_ings_list.extend([memo_prefix + x.strip() for x in d_memo.replace("、", ",").split(",") if x.strip()])
+                splitted_memo = d_memo.replace("、", ",").replace("\n", ",").split(",")
+                all_ings_list.extend([memo_prefix + x.strip() for x in splitted_memo if x.strip()])
 
         for selected_dish in selected_memos:
             ing_raw_memo = df_menu[df_menu["料理名"] == selected_dish]["材料"].iloc[0]
-            all_ings_list.extend([x.strip() for x in str(ing_raw_memo).replace("、", ",").split(",") if x.strip()])
+            splitted_定番 = str(ing_raw_memo).replace("、", ",").replace("\n", ",").split(",")
+            all_ings_list.extend([x.strip() for x in splitted_定番 if x.strip()])
 
         if new_history_entries:
             df_combined_h = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
             save_to_github(df_combined_h.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, "Update history", hist_sha)
             st.toast("履歴を保存しました")
 
+        st.session_state["current_rows_html"] = rows_html
+        st.session_state["current_header_html"] = header_html
+        
+        # 買い物リストの初期データ作成
+        counts = pd.Series(all_ings_list).value_counts()
+        init_shopping = []
+        for item, count in counts.items():
+            category = "99未分類"
+            if "メモ:" not in str(item):
+                if df_dict is not None:
+                    for _, row in df_dict.iterrows():
+                        if str(row["材料"]) in str(item): category = row["種別"]; break
+            else:
+                category = "📝 各日メモ"
+            init_shopping.append({"項目": item, "個数": count, "カテゴリー": category, "表示名": f"{item} × {count}" if count > 1 else item})
+        st.session_state["shopping_list_df"] = pd.DataFrame(init_shopping)
+
+    if "shopping_list_df" in st.session_state:
         st.markdown("### 🗓 確定した献立")
-        st.markdown(f'<table class="preview-table">{header_html}{rows_html}</table>', unsafe_allow_html=True)
+        st.markdown(f'<table class="preview-table">{st.session_state["current_header_html"]}{st.session_state["current_rows_html"]}</table>', unsafe_allow_html=True)
 
-        if all_ings_list:
-            counts = pd.Series(all_ings_list).value_counts()
-            result_data = []
-            for item, count in counts.items():
-                category = "99未分類"
-                if "メモ:" not in str(item):
-                    if df_dict is not None:
-                        for _, row in df_dict.iterrows():
-                            if str(row["材料"]) in str(item): category = row["種別"]; break
-                else:
-                    category = "📝 各日メモ"
-                result_data.append({"name": f"{item} × {count}" if count > 1 else item, "cat": category})
-            
-            df_res = pd.DataFrame(result_data).sort_values("cat")
-            cards_html = "".join([f'<div class="shopping-card"><div class="category-label">{cat}</div>' + "".join([f'<div class="item-row">□ {row["name"]}</div>' for _, row in group.iterrows()]) + '</div>' for cat, group in df_res.groupby("cat")])
-            st.markdown("### 🛒 買い物リスト")
-            st.markdown(cards_html, unsafe_allow_html=True)
+        st.markdown("### 🛒 買い物リストの編集")
+        st.info("項目名を書き換えたり、不要な行を削除してから下の印刷・表示に進んでください。")
+        
+        # データフレームエディタで直接編集・削除を可能にする
+        edited_df = st.data_editor(
+            st.session_state["shopping_list_df"],
+            column_config={
+                "項目": st.column_config.TextColumn("材料・項目名", width="large"),
+                "個数": st.column_config.NumberColumn("数", min_value=1, step=1),
+                "カテゴリー": st.column_config.SelectboxColumn("カテゴリ", options=["肉・魚", "野菜", "乳製品・卵", "加工食品", "調味料", "📝 各日メモ", "99未分類"]),
+                "表示名": None # 自動生成するので非表示
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="shopping_editor"
+        )
+        st.session_state["shopping_list_df"] = edited_df
 
-            raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>{header_html}{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
-            b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
-            components.html(f"""
-                <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷する</button></div>
-                <script>
-                document.getElementById('pbtn').onclick = function() {{
-                    var html = atob('{b64_html}');
-                    var w = window.open('', '_blank');
-                    w.document.open(); w.document.write(decodeURIComponent(escape(html))); w.document.close();
-                    setTimeout(function() {{ w.focus(); w.print(); }}, 500);
-                }};
-                </script>
-            """, height=80)
+        # 最終表示用HTML生成
+        cards_html = ""
+        if not edited_df.empty:
+            # 表示名の再計算
+            edited_df["final_name"] = edited_df.apply(lambda r: f"{r['項目']} × {r['個数']}" if int(r['個数']) > 1 else str(r['項目']), axis=1)
+            for cat, group in edited_df.sort_values("カテゴリー").groupby("カテゴリー"):
+                cards_html += f'<div class="shopping-card"><div class="category-label">{cat}</div>'
+                for _, row in group.iterrows():
+                    cards_html += f'<div class="item-row">□ {row["final_name"]}</div>'
+                cards_html += '</div>'
+        
+        st.markdown("---")
+        st.markdown("### 🛒 最終買い物リスト")
+        st.markdown(cards_html, unsafe_allow_html=True)
+
+        raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
+        b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
+        components.html(f"""
+            <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷する</button></div>
+            <script>
+            document.getElementById('pbtn').onclick = function() {{
+                var html = atob('{b64_html}');
+                var w = window.open('', '_blank');
+                w.document.open(); w.document.write(decodeURIComponent(escape(html))); w.document.close();
+                setTimeout(function() {{ w.focus(); w.print(); }}, 500);
+            }};
+            </script>
+        """, height=80)
 
 with tab_hist:
     st.subheader("📜 履歴の管理")
     if not df_hist.empty:
         df_hist_display = df_hist.copy().sort_values(["日付", "料理名"], ascending=[False, True])
         selected_hist_idx = st.selectbox("修正・削除するデータを選択", range(len(df_hist_display)), format_func=lambda i: f"{df_hist_display.iloc[i]['日付']} - {df_hist_display.iloc[i]['料理名']}")
-        
         col1, col2 = st.columns(2)
         with col1:
             if st.button("選択した履歴を削除", type="secondary", use_container_width=True):

@@ -29,12 +29,13 @@ except ImportError:
 # [運用ルール]
 # - [2026/02/22] 物理分割導入: app.py, auth_module.py, github_utils.py。
 # - [2026/02/22] 買い物リストの個別編集・削除・数量・A4印刷仕様を完全復元。
+# - [2026/02/22] 買い物リストの名称を「買い物リスト」に統一。
 # - [2026/02/22] 全文作成のルールは「各ファイル単位での全文作成」とする。
 # - [2026/02/22] 修正時はAIが段階的プロンプトを作成し、ユーザーが順次適用する。
-# - [2026/02/22] 狭い画面でも買い物リストが縦に割れないよう、CSSを強力な!important制約に更新。
+# - [2026/02/22] 買い物リストのモバイル表示を最適化。フォントとボタンを小型化し横一行を死守。
 # ==============================================================================
 
-VERSION = "1.7.5"
+VERSION = "1.7.6"
 FILE = "menu.csv"
 HIST_FILE = "history.csv"
 DRAFT_FILE = "draft.json"
@@ -59,22 +60,38 @@ st.markdown("""
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     .edit-item-box { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; margin: 5px 0; }
     
-    /* 買い物リストの強制横並び設定 (強力版) */
+    /* 買い物リストのモバイル最適化 (一行死守) */
+    .shopping-item-text {
+        font-size: 0.85rem !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+    }
+    .shopping-count-text {
+        font-size: 0.8rem !important;
+        color: #666;
+    }
+    
     [data-testid="column"] {
         flex: 0 1 auto !important;
-        min-width: fit-content !important;
+        min-width: 0px !important;
     }
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
         align-items: center !important;
-        gap: 0.5rem !important;
+        gap: 0.2rem !important; /* 間隔を狭める */
     }
-    /* ボタンの余白調整 */
+    /* ボタンを極小化 */
     div[data-testid="stHorizontalBlock"] button {
-        padding: 0px 5px !important;
-        min-height: 30px !important;
+        padding: 0px 2px !important;
+        min-height: 24px !important;
+        max-height: 24px !important;
+        font-size: 0.7rem !important;
+        line-height: 1 !important;
+        width: 32px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -209,10 +226,10 @@ with tab_plan:
                 i_id = item_obj["id"]
                 if st.session_state.get(f"del_{i_id}", False): continue
                 
-                # 強制横並び用カラム設定
-                c1, c2, c3, c4 = st.columns([6, 1, 1, 1])
-                c1.markdown(f"□ {item_obj['item']}")
-                c2.markdown(f"{item_obj['count']}" if item_obj['count'] > 1 else "")
+                # 比率を [10, 2, 2, 2] に変更し、材料名を優先
+                c1, c2, c3, c4 = st.columns([10, 2, 2, 2])
+                c1.markdown(f'<span class="shopping-item-text">□ {item_obj["item"]}</span>', unsafe_allow_html=True)
+                c2.markdown(f'<span class="shopping-count-text">{item_obj["count"] if item_obj["count"] > 1 else ""}</span>', unsafe_allow_html=True)
                 if c3.button("📝", key=f"ed_{i_id}"): st.session_state[f"edit_{i_id}"] = True
                 if c4.button("🗑️", key=f"dl_{i_id}"): 
                     st.session_state[f"del_{i_id}"] = True

@@ -35,9 +35,10 @@ import re
 # - [2026/02/22] 画面右上にログインIDとログアウトリンクを表示。
 # - [2026/02/22] 履歴データをユーザーごとに分離し、自分の履歴のみが操作可能。
 # - [2026/02/22] サイドバーを廃止し、2カラム構成にしない（無駄な領域を排除）。
+# - [2026/02/22] スマホ等でのログイン利便性向上のため、ブラウザのアカウント保存機能（オートコンプリート）に対応。
 # ==============================================================================
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -118,9 +119,10 @@ if not st.session_state['authenticated']:
     tab_log, tab_reg = st.tabs(["ログイン", "新規ユーザー登録"])
     
     with tab_log:
-        with st.form("login_form"):
-            e = st.text_input("メールアドレス")
-            p = st.text_input("パスワード", type="password")
+        # ブラウザのパスワードマネージャーが動作するように属性を付与
+        with st.form("login_form", clear_on_submit=False):
+            e = st.text_input("メールアドレス", key="login_email", autocomplete="email")
+            p = st.text_input("パスワード", type="password", key="login_password", autocomplete="current-password")
             if st.form_submit_button("ログイン", use_container_width=True):
                 users, _ = get_users_data()
                 if e in users and users[e] == p:
@@ -131,9 +133,9 @@ if not st.session_state['authenticated']:
     
     with tab_reg:
         with st.form("reg_form"):
-            ne = st.text_input("メールアドレス")
-            np = st.text_input("パスワード（半角英数字8文字以上）", type="password")
-            cp = st.text_input("確認用パスワード", type="password")
+            ne = st.text_input("メールアドレス", key="reg_email", autocomplete="email")
+            np = st.text_input("パスワード（半角英数字8文字以上）", type="password", key="reg_password", autocomplete="new-password")
+            cp = st.text_input("確認用パスワード", type="password", key="reg_password_conf", autocomplete="new-password")
             if st.form_submit_button("登録する", use_container_width=True):
                 if not re.match(r'^[a-zA-Z0-9]{8,}$', np): st.error("パスワード条件を満たしていません")
                 elif np != cp: st.error("パスワードが一致しません")

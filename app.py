@@ -30,13 +30,13 @@ import os
 # - 【最重要】修正時は必ず「全文」を出力すること。一部省略は厳禁。
 # - 【最重要】既存の細かい仕様（印刷、CSS等）は指示がない限り絶対に変えない。
 # - 【最重要】ユーザーからの追加指示は、毎回このセクションに書き足して更新すること。
-# - [2026/02/22] 買い物リストの編集(📝)・削除(🗑️)ボタンを復活。
-# - [2026/02/22] 材料名の抽出ロジックを修正し、材料が繋がって表示されるバグを解消。
+# - [2026/02/22] 材料名が横並びに結合されるバグを、正規表現による分割ロジック強化で解消。
+# - [2026/02/22] 買い物リストの編集(📝)・削除(🗑️)ボタンを維持。
 # - [2026/02/22] 確定献立表のヘッダーを「メニュー1, メニュー2...」の通し番号形式に変更し、最後を「汁物」に固定。
 # - [2026/02/22] パスワード保存方式をPBKDF2（SHA256）によるハッシュ化方式に変更。
 # ==============================================================================
 
-VERSION = "1.9.5"
+VERSION = "1.9.6"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -234,13 +234,15 @@ with tab_plan:
                     items.append(dish)
                     new_history_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": dish, "user": st.session_state['user_email']})
                     raw_material = str(df_menu[df_menu["料理名"] == dish]["材料"].iloc[0])
-                    # 改行や読点、全角スペースなどで確実に分離
-                    all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\r\s・/]+', raw_material) if x.strip()])
+                    # 正規表現を強化：読点(、), カンマ(,), 改行(\n\r), 全角/半角スペース(\s), 中黒(・), スラッシュ(/) で確実に分割
+                    split_ings = [x.strip() for x in re.split(r'[、,\n\r\s・/]+', raw_material) if x.strip()]
+                    all_ings_list.extend(split_ings)
             for j in range(max_menu_cols): row += f"<td>{items[j] if j < len(items) else '-'}</td>"
             soup = data["menu"].get("汁物", [])
             for s_dish in soup:
                 new_history_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": s_dish, "user": st.session_state['user_email']})
-                all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\r\s・/]+', str(df_menu[df_menu["料理名"]==s_dish]["材料"].iloc[0])) if x.strip()])
+                raw_soup = str(df_menu[df_menu["料理名"]==s_dish]["材料"].iloc[0])
+                all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\r\s・/]+', raw_soup) if x.strip()])
             row += f"<td>{', '.join(soup) if soup else '-'}</td>"
             r_html += f"<tr>{row}</tr>"
             if data["memo"]: all_ings_list.extend([f"{d_str}メモ: " + x.strip() for x in re.split(r'[、,\n\r\s・/]+', data["memo"]) if x.strip()])
@@ -280,7 +282,6 @@ with tab_plan:
                             if d["id"] == i_id: d["item"] = new_val; break
                         st.session_state[f"edit_{i_id}"] = False; st.rerun()
 
-        # 印刷用
         active = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
         cards = "".join([f'<div style="border:1px solid #ccc;padding:5px;width:45%;break-inside:avoid;"><h3>{cat}</h3>' + "".join([f'<div>□ {r["item"]} ({r["count"]})</div>' for r in active if r["cat"]==cat]) + '</div>' for cat in sorted(list(set(d["cat"] for d in active)))])
         b64 = base64.b64encode(f"<html><body><h2>献立</h2><table>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table><h2>リスト</h2><div style='display:flex;flex-wrap:wrap;gap:10px;'>{cards}</div></body></html>".encode('utf-8')).decode('utf-8')

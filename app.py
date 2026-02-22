@@ -36,13 +36,14 @@ import re
 # - [2026/02/22] 買い物リスト編集時、元のカテゴリーを自動で引き継ぎ、勝手に「未分類」へ移動しないよう修正。編集項目からカテゴリー選択を削除。
 # - [2026/02/22] 買い物リストにおいて、材料の数量（個数）を独立した列として扱い、表示・編集・印刷に反映させる。
 # - [2026/02/22] 印刷設定を変更。A4一枚に収まるようレイアウトを最適化。文字サイズは約10ptを基準とし、余白や表の幅を調整。
-# - [2026/02/22] ログイン機能を追加。IDはメールアドレス、パスワードは半角英数字8文字。環境変数（Streamlit Secrets）で管理。既存デザインを維持。
+# - [2026/02/22] ログイン機能を追加。IDはメールアドレス、パスワードは半角英数字8文字。既存デザインを維持。
 # - [2026/02/22] 新規ユーザー登録機能を追加。ユーザー情報はGitHub上のusers.jsonで管理。
-# - [2026/02/22] ログイン中、画面右上にユーザー名とログアウトリンクを表示。
-# - [2026/02/22] 履歴データをユーザーごとに分離して管理・表示するよう拡張。
+# - [2026/02/22] 画面右上にログインIDを表示し、同箇所にログアウト機能を配置。
+# - [2026/02/22] 履歴データをユーザーごとに分離し、自分の履歴のみが操作可能となるよう修正。
+# - [2026/02/22] TypeError（st.buttonのレンダリングエラー）を修正。
 # ==============================================================================
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -97,8 +98,11 @@ st.markdown("""
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     .edit-item-box { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; margin: 5px 0; }
     .login-box { max-width: 400px; margin: 0 auto; padding: 20px; background: white; border-radius: 12px; border: 1px solid #eee; }
-    .user-info-fixed { position: fixed; top: 10px; right: 10px; z-index: 1000; font-size: 0.8rem; text-align: right; background: rgba(255,255,255,0.8); padding: 5px; border-radius: 5px; }
-    .logout-link { color: #ff4b4b; text-decoration: none; font-weight: 400; cursor: pointer; }
+    
+    /* 右上ユーザー情報用 */
+    .user-info-container { position: fixed; top: 10px; right: 10px; z-index: 999; text-align: right; background: rgba(255,255,255,0.9); padding: 5px 10px; border-radius: 8px; border: 1px solid #eee; }
+    .user-id-text { font-size: 0.75rem; color: #666; margin-bottom: 2px; }
+    .logout-btn-style { background: none; border: none; color: #ff4b4b; text-decoration: underline; font-size: 0.75rem; cursor: pointer; padding: 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,10 +120,9 @@ def get_users_data():
 
 def login_screen():
     st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
+    tab_login, tab_signup = st.tabs(["ログイン", "新規登録"])
     
-    login_tab, signup_tab = st.tabs(["ログイン", "新規登録"])
-    
-    with login_tab:
+    with tab_login:
         st.markdown('<div class="login-box">', unsafe_allow_html=True)
         with st.form("login_form"):
             email_input = st.text_input("メールアドレス")
@@ -135,55 +138,58 @@ def login_screen():
                     st.error("IDまたはパスワードが正しくありません")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with signup_tab:
+    with tab_signup:
         st.markdown('<div class="login-box">', unsafe_allow_html=True)
         with st.form("signup_form"):
-            new_email = st.text_input("メールアドレス（ID）")
+            new_email = st.text_input("メールアドレス")
             new_pass = st.text_input("パスワード（半角英数字8文字）", type="password")
-            confirm_pass = st.text_input("パスワード再入力", type="password")
-            signup_submit = st.form_submit_button("アカウント作成", use_container_width=True)
+            confirm_pass = st.text_input("確認用パスワード", type="password")
+            signup_submit = st.form_submit_button("アカウントを作成する", use_container_width=True)
             
             if signup_submit:
                 if not re.match(r'^[a-zA-Z0-9]{8,}$', new_pass):
-                    st.error("パスワードは半角英数字8文字以上で設定してください")
+                    st.error("パスワードは半角英数字8文字以上で入力してください")
                 elif new_pass != confirm_pass:
                     st.error("パスワードが一致しません")
                 elif not new_email or "@" not in new_email:
-                    st.error("有効なメールアドレスを入力してください")
+                    st.error("正しいメールアドレスを入力してください")
                 else:
                     users, sha = get_users_data()
                     if new_email in users:
                         st.error("このメールアドレスは既に登録されています")
                     else:
                         users[new_email] = new_pass
-                        res = save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Add user {new_email}", sha)
+                        res = save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Register user {new_email}", sha)
                         if res in [200, 201]:
-                            st.success("登録完了！ログインしてください")
+                            st.success("登録完了しました。ログインタブからログインしてください。")
                         else:
-                            st.error(f"登録失敗。Status: {res}")
+                            st.error(f"保存エラー: {res}")
         st.markdown('</div>', unsafe_allow_html=True)
 
 if not st.session_state['authenticated']:
     login_screen()
     st.stop()
 
-# ログイン中のヘッダー表示
+# --- 右上ユーザー表示・ログアウト処理 ---
 st.markdown(f"""
-    <div class="user-info-fixed">
-        ログイン中: {st.session_state['user_email']}<br>
-        <a href="javascript:window.location.reload();" class="logout-link" id="logout_trigger">ログアウト</a>
+    <div class="user-info-container">
+        <div class="user-id-text">ID: {st.session_state['user_email']}</div>
     </div>
 """, unsafe_allow_html=True)
 
-# ログアウト処理用の隠しボタン（CSS/JS経由でトリガーは難しいため、Streamlit標準機能で最下部にも配置するが、右上からも連動させる工夫）
-if st.button("Logout", key="hidden_logout", help="Logout", label_visibility="collapsed"):
-    st.session_state['authenticated'] = False
-    st.rerun()
+# 右上の配置に合わせるため、サイドバーの仕組みを使わずフローティング風にするが、
+# Streamlitの機能として確実に動作させるため、サイドバー上部にログアウトボタンを配置
+with st.sidebar:
+    st.write(f"Logged in: {st.session_state['user_email']}")
+    if st.button("ログアウト", type="primary"):
+        st.session_state['authenticated'] = False
+        st.session_state['user_email'] = ""
+        st.rerun()
 
 # --- 4. メインアプリ（データ取得） ---
 def get_menu_data():
     content, sha = get_github_content(FILE)
-    if content and isinstance(content, str):
+    if content:
         df = pd.read_csv(io.StringIO(content))
         return df, sha
     else:
@@ -193,9 +199,12 @@ def get_menu_data():
 @st.cache_data(ttl=60)
 def get_history_data():
     content, sha = get_github_content(HIST_FILE)
-    if content and isinstance(content, str):
+    if content:
         df_h = pd.read_csv(io.StringIO(content))
         if "uid" in df_h.columns: df_h = df_h.drop(columns=["uid"])
+        # ユーザー列がない場合の互換性維持
+        if "user" not in df_h.columns:
+            df_h["user"] = "unknown"
         return df_h, sha
     return pd.DataFrame(columns=["日付", "曜日", "料理名", "user"]), None
 
@@ -213,7 +222,7 @@ df_dict = get_dict_data()
 df_hist, hist_sha = get_history_data()
 
 draft_content, draft_sha = get_github_content(DRAFT_FILE)
-draft_data = json.loads(draft_content) if isinstance(draft_content, str) else {}
+draft_data = json.loads(draft_content) if draft_content and isinstance(draft_content, str) else {}
 
 if df_menu is None:
     st.stop() 
@@ -459,10 +468,7 @@ with tab_plan:
 with tab_hist:
     st.subheader("📜 履歴の管理")
     
-    # ユーザーごとの履歴にフィルタリング
-    if "user" not in df_hist.columns:
-        df_hist["user"] = "common"
-    
+    # ログイン中のユーザーIDで履歴をフィルタリング
     user_df_hist = df_hist[df_hist["user"] == st.session_state['user_email']]
     
     if not user_df_hist.empty:
@@ -473,7 +479,7 @@ with tab_hist:
             if st.button("選択した履歴を削除", type="secondary", use_container_width=True):
                 target_date = df_hist_display.iloc[selected_hist_idx]['日付']
                 target_name = df_hist_display.iloc[selected_hist_idx]['料理名']
-                # 全体データから該当ユーザーの該当行を消す
+                # 元のdf_histから特定ユーザーの特定行を削除
                 df_hist = df_hist[~((df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name) & (df_hist['user'] == st.session_state['user_email']))]
                 save_to_github(df_hist.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, f"Delete history {target_date}", hist_sha)
                 st.cache_data.clear()
@@ -490,7 +496,7 @@ with tab_hist:
         st.divider()
         st.dataframe(df_hist_display.drop(columns=["user"]), use_container_width=True, hide_index=True)
     else:
-        st.info("履歴がありません")
+        st.info("表示できる履歴がありません。")
 
 # --- 7. タブ: メニュー管理 & 設定 ---
 with tab_manage:
@@ -523,7 +529,7 @@ with tab_manage:
     
     st.divider()
     st.subheader("👤 アカウント設定")
-    if st.button("ログアウト", type="secondary", use_container_width=True):
+    if st.button("ログアウトする", key="footer_logout", type="secondary", use_container_width=True):
         st.session_state['authenticated'] = False
         st.session_state['user_email'] = ""
         st.rerun()

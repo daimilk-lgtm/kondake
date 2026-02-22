@@ -27,10 +27,11 @@ from datetime import datetime, timedelta
 # - [2026/02/22] 買い物リスト反映時、メモ内容に「日付・曜日」を付記すること。
 # - [2026/02/22] 読み込み失敗時、エラーを握りつぶさずStatus Codeやレスポンス詳細を表示。
 # - [2026/02/22] 献立入力時、選択した曜日タブが勝手に切り替わらないよう操作性を維持する。
-# - [2026/02/22] GitHub上に「draft.json」を作成し、入力中の内容を一時保存・共有可能にする。
+# - [2026/02/22] GitHub上に「draft.json」を作成し、入力内容を共有可能にする。
+# - [2026/02/22] 上記一時保存用の実行ボタン名は「一時保存」とする。
 # ==============================================================================
 
-VERSION = "1.3.8"
+VERSION = "1.3.9"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -142,7 +143,6 @@ with tab_plan:
             day_menu = {}
             for cat in cats:
                 key_name = f"s_{i}_{cat}"
-                # 一時保存データがあれば初期値として使用
                 default_val = draft_data.get(key_name, [])
                 day_menu[cat] = st.multiselect(
                     cat, 
@@ -162,7 +162,6 @@ with tab_plan:
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i], "memo": day_memo}
 
     list_memo_options = df_menu[df_menu["カテゴリー"] == "主菜2"]["料理名"].tolist()
-    # 定番アイテムの一時保存反映
     def_memos = draft_data.get("list_memo_multi", [])
     selected_memos = st.multiselect(
         "定番アイテム", 
@@ -172,10 +171,9 @@ with tab_plan:
         placeholder="選択..."
     )
 
-    col_save, col_clear = st.columns(2)
+    col_save, _ = st.columns([1, 1])
     with col_save:
-        if st.button("GitHubへ一時保存", use_container_width=True):
-            # 現在のセッション状態（入力内容）を保存用辞書にまとめる
+        if st.button("一時保存", use_container_width=True):
             current_draft = {}
             for i in range(7):
                 for cat in cats:
@@ -185,9 +183,9 @@ with tab_plan:
             
             res_code = save_to_github(json.dumps(current_draft, ensure_ascii=False), DRAFT_FILE, "Update draft", draft_sha)
             if res_code in [200, 201]:
-                st.toast("入力を一時保存しました（他端末と同期可能）")
+                st.toast("入力を一時保存しました")
             else:
-                st.error("保存に失敗しました。")
+                st.error("一時保存に失敗しました。")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list = []

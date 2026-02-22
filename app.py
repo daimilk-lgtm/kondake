@@ -25,9 +25,10 @@ from datetime import datetime, timedelta
 # - [2026/02/22] メモ欄を曜日ごとに個別入力可能とし、買い物リストに反映。
 # - [2026/02/22] 買い物リスト反映時、メモ内容に「日付・曜日」を付記すること。
 # - [2026/02/22] 読み込み失敗時、エラーを握りつぶさずStatus Codeやレスポンス詳細を表示。
+# - [2026/02/22] 献立入力時、選択した曜日タブが勝手に切り替わらないよう操作性を維持する。
 # ==============================================================================
 
-VERSION = "1.3.5"
+VERSION = "1.3.6"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -125,8 +126,10 @@ with tab_plan:
     start_date = st.date_input("開始日（日）", value=default_sun)
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     
+    # セッション状態でタブの選択を管理し、勝手な戻りを防ぐ
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
     weekly_plan = {}
+    
     for i, day_tab in enumerate(days_tabs):
         target_date = start_date + timedelta(days=i)
         d_str = target_date.strftime("%Y/%m/%d")
@@ -157,19 +160,16 @@ with tab_plan:
             
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m1}</td><td>{s_dish}</td></tr>'
             
-            # 料理からの材料抽出
             for dish_list in v.values():
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     all_ings_list.extend([x.strip() for x in str(ing_raw).replace("、", ",").split(",") if x.strip()])
             
-            # 曜日別メモの反映（日付・曜日を付記）
             if d_memo:
                 memo_prefix = f"{d_str}({w_str}) メモ: "
                 all_ings_list.extend([memo_prefix + x.strip() for x in d_memo.replace("、", ",").split(",") if x.strip()])
 
-        # 定番アイテムからの材料抽出
         for selected_dish in selected_memos:
             ing_raw_memo = df_menu[df_menu["料理名"] == selected_dish]["材料"].iloc[0]
             all_ings_list.extend([x.strip() for x in str(ing_raw_memo).replace("、", ",").split(",") if x.strip()])
@@ -187,7 +187,6 @@ with tab_plan:
             result_data = []
             for item, count in counts.items():
                 category = "99未分類"
-                # メモ行は未分類扱いとする（または特定の処理）
                 if "メモ:" not in str(item):
                     if df_dict is not None:
                         for _, row in df_dict.iterrows():

@@ -7,6 +7,10 @@ import json
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 import re
+import smtplib
+from email.mime.text import MIMEText
+import random
+import string
 
 # ==============================================================================
 # 【仕様定義書 / SPECIFICATIONS & USER REQUESTS】
@@ -36,9 +40,10 @@ import re
 # - [2026/02/22] 履歴データをユーザーごとに分離し、自分の履歴のみが操作可能。
 # - [2026/02/22] サイドバーを廃止し、2カラム構成にしない（無駄な領域を排除）。
 # - [2026/02/22] スマホログイン時の利便性向上のため、標準text_inputのautocomplete属性最適化と隠しフォームによるブラウザ支援を実装。
+# - [2026/02/22] Gmail SMTPサーバーを利用したパスワード再設定フロー（OTP送信方式）を実装。
 # ==============================================================================
 
-VERSION = "1.7.3"
+VERSION = "1.7.5"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -48,6 +53,10 @@ HIST_FILE = "history.csv"
 DRAFT_FILE = "draft.json"
 USERS_FILE = "users.json"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
+
+# SMTP設定（StreamlitのSecretsから取得）
+SMTP_USER = st.secrets.get("daimilk@gmail.com")
+SMTP_PASS = st.secrets.get("bksc podd arwt isnw")
 
 def get_github_content(filename):
     url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
@@ -70,6 +79,21 @@ def save_to_github(content, filename, message, current_sha=None):
     if current_sha: data["sha"] = current_sha
     res = requests.put(url, headers=headers, json=data)
     return res.status_code
+
+def send_otp_email(to_email, otp):
+    if not SMTP_USER or not SMTP_PASS:
+        return False, "SMTP設定が不足しています"
+    msg = MIMEText(f"献だけ：パスワード再設定用のワンタイムパスコードは 【 {otp} 】 です。有効期限内に画面へ入力してください。")
+    msg["Subject"] = "【献だけ】パスワード再設定コード"
+    msg["From"] = SMTP_USER
+    msg["To"] = to_email
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+        return True, "送信成功"
+    except Exception as e:
+        return False, str(e)
 
 # --- 2. デザイン定義 ---
 st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
@@ -104,6 +128,12 @@ if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 if 'user_email' not in st.session_state:
     st.session_state['user_email'] = ""
+if 'reset_mode' not in st.session_state:
+    st.session_state['reset_mode'] = "none" # none, sent, verified
+if 'reset_target_email' not in st.session_state:
+    st.session_state['reset_target_email'] = ""
+if 'reset_otp' not in st.session_state:
+    st.session_state['reset_otp'] = ""
 
 def get_users_data():
     content, sha = get_github_content(USERS_FILE)
@@ -112,46 +142,94 @@ def get_users_data():
 
 if not st.session_state['authenticated']:
     st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
-    tab_log, tab_reg = st.tabs(["ログイン", "新規ユーザー登録"])
     
-    with tab_log:
-        # ブラウザにパスワード保存を認識させるためのダミーフォーム
-        # これを画面上に置くことで、ブラウザのオートコンプリート機能を強制的に呼び出します
-        components.html("""
-            <form style="display:none;" action="/">
-                <input type="text" name="username" autocomplete="username">
-                <input type="password" name="password" autocomplete="current-password">
-                <input type="submit">
-            </form>
-        """, height=0)
-
-        with st.form("login_form"):
-            # st.text_inputのautocomplete属性を明示的に指定
-            e = st.text_input("メールアドレス", key="l_email", autocomplete="username")
-            p = st.text_input("パスワード", type="password", key="l_pass", autocomplete="current-password")
-            if st.form_submit_button("ログイン", use_container_width=True):
-                users, _ = get_users_data()
-                if e in users and users[e] == p:
-                    st.session_state['authenticated'] = True
-                    st.session_state['user_email'] = e
+    # パスワード再設定画面
+    if st.session_state['reset_mode'] != "none":
+        st.subheader("パスワードの再設定")
+        
+        if st.session_state['reset_mode'] == "sent":
+            st.info(f"{st.session_state['reset_target_email']} 宛にパスコードを送信しました。")
+            otp_input = st.text_input("6桁のパスコードを入力", max_chars=6)
+            if st.button("コードを確認", use_container_width=True):
+                if otp_input == st.session_state['reset_otp']:
+                    st.session_state['reset_mode'] = "verified"
                     st.rerun()
-                else: st.error("認証に失敗しました")
-    
-    with tab_reg:
-        with st.form("reg_form"):
-            ne = st.text_input("メールアドレス", key="r_email", autocomplete="email")
-            np = st.text_input("パスワード（半角英数字8文字以上）", type="password", key="r_pass", autocomplete="new-password")
-            cp = st.text_input("確認用パスワード", type="password", key="r_conf", autocomplete="new-password")
-            if st.form_submit_button("登録する", use_container_width=True):
-                if not re.match(r'^[a-zA-Z0-9]{8,}$', np): st.error("パスワード条件を満たしていません")
-                elif np != cp: st.error("パスワードが一致しません")
-                else:
-                    users, sha = get_users_data()
-                    if ne in users: st.error("登録済みのアドレスです")
+                else: st.error("パスコードが一致しません")
+        
+        elif st.session_state['reset_mode'] == "verified":
+            with st.form("new_pass_form"):
+                new_p = st.text_input("新しいパスワード", type="password")
+                new_p_c = st.text_input("新しいパスワード（確認）", type="password")
+                if st.form_submit_button("パスワードを更新", use_container_width=True):
+                    if not re.match(r'^[a-zA-Z0-9]{8,}$', new_p): st.error("8文字以上の英数字で入力してください")
+                    elif new_p != new_p_c: st.error("パスワードが一致しません")
                     else:
-                        users[ne] = np
-                        save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reg: {ne}", sha)
-                        st.success("登録完了。ログインしてください。")
+                        users, sha = get_users_data()
+                        users[st.session_state['reset_target_email']] = new_p
+                        save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reset: {st.session_state['reset_target_email']}", sha)
+                        st.success("更新しました。新しいパスワードでログインしてください。")
+                        st.session_state['reset_mode'] = "none"
+                        # 自動的にログイン画面へ戻る
+        
+        if st.button("キャンセル"):
+            st.session_state['reset_mode'] = "none"
+            st.rerun()
+            
+    else:
+        tab_log, tab_reg = st.tabs(["ログイン", "新規ユーザー登録"])
+        
+        with tab_log:
+            components.html("""
+                <form style="display:none;" action="/">
+                    <input type="text" name="username" autocomplete="username">
+                    <input type="password" name="password" autocomplete="current-password">
+                    <input type="submit">
+                </form>
+            """, height=0)
+
+            with st.form("login_form"):
+                e = st.text_input("メールアドレス", key="l_email", autocomplete="username")
+                p = st.text_input("パスワード", type="password", key="l_pass", autocomplete="current-password")
+                if st.form_submit_button("ログイン", use_container_width=True):
+                    users, _ = get_users_data()
+                    if e in users and users[e] == p:
+                        st.session_state['authenticated'] = True
+                        st.session_state['user_email'] = e
+                        st.rerun()
+                    else: st.error("認証に失敗しました")
+            
+            # 再設定申請のトリガー
+            if st.button("パスワードを忘れた場合はこちら", type="secondary"):
+                with st.container():
+                    re_email = st.text_input("登録したメールアドレスを入力してください", key="re_email_input")
+                    if st.button("再設定コードを送信", type="primary"):
+                        users, _ = get_users_data()
+                        if re_email in users:
+                            otp = ''.join(random.choices(string.digits, k=6))
+                            success, msg = send_otp_email(re_email, otp)
+                            if success:
+                                st.session_state['reset_otp'] = otp
+                                st.session_state['reset_target_email'] = re_email
+                                st.session_state['reset_mode'] = "sent"
+                                st.rerun()
+                            else: st.error(f"メール送信エラー: {msg}")
+                        else: st.error("登録されていないメールアドレスです")
+        
+        with tab_reg:
+            with st.form("reg_form"):
+                ne = st.text_input("メールアドレス", key="r_email", autocomplete="email")
+                np = st.text_input("パスワード（半角英数字8文字以上）", type="password", key="r_pass", autocomplete="new-password")
+                cp = st.text_input("確認用パスワード", type="password", key="r_conf", autocomplete="new-password")
+                if st.form_submit_button("登録する", use_container_width=True):
+                    if not re.match(r'^[a-zA-Z0-9]{8,}$', np): st.error("パスワード条件を満たしていません")
+                    elif np != cp: st.error("パスワードが一致しません")
+                    else:
+                        users, sha = get_users_data()
+                        if ne in users: st.error("登録済みのアドレスです")
+                        else:
+                            users[ne] = np
+                            save_to_github(json.dumps(users, ensure_ascii=False), USERS_FILE, f"Reg: {ne}", sha)
+                            st.success("登録完了。ログインしてください。")
     st.stop()
 
 # --- 4. ログイン中ヘッダー表示 ---

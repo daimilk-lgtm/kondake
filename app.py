@@ -41,10 +41,10 @@ import string
 # - [2026/02/22] サイドバーを廃止し、2カラム構成にしない（無駄な領域を排除）。
 # - [2026/02/22] スマホログイン時の利便性向上のため、標準text_inputのautocomplete属性最適化と隠しフォームによるブラウザ支援を実装。
 # - [2026/02/22] Gmail SMTPサーバーを利用したパスワード再設定フロー（OTP送信方式）を実装。
-# - [2026/02/22] 印刷用HTML生成時のf-string構文エラー（SyntaxError）を修正。
+# - [2026/02/22] 印刷用HTMLの生成ロジックにおいて発生していたSyntaxErrorを、f-stringの修正により解消。
 # ==============================================================================
 
-VERSION = "1.7.7"
+VERSION = "1.7.8"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -361,8 +361,12 @@ with tab_plan:
         active = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
         cards_html = "".join([f'<div class="print-card"><h3>{c}</h3>' + "".join([f'<div class="print-row"><span>□ {r["item"]}</span><span>{f"({r['count']})" if r["count"]>1 else ""}</span></div>' for r in active if r["cat"]==c]) + '</div>' for c in sorted(list(set(d["cat"] for d in active)))])
         
-        # 波括弧を {{ }} でエスケープして修正
-        print_html = f"<html><head><style>@page {{ size: A4; margin: 10mm; }} body {{ font-family: sans-serif; font-size: 10pt; }} .print-container {{ display: flex; flex-wrap: wrap; gap: 10px; }} .print-card {{ border: 1px solid #ccc; padding: 5px; width: calc(50% - 10px); break-inside: avoid; }} .print-row {{ display: flex; justify-content: space-between; border-bottom: 1px solid #eee; }}</style></head><body><h2>🗓 献立表</h2><table>{st.session_state.get('current_header_html','')}{st.session_state.get('current_rows_html','')}</table><h2>🛒 買い物リスト</h2><div class="print-container">{cards_html}</div></body></html>"
+        # 修正：CSSの波括弧をエスケープし、改行や引用符の干渉を防ぐため1行の文字列として定義
+        css_style = "<style>@page { size: A4; margin: 10mm; } body { font-family: sans-serif; font-size: 10pt; } .print-container { display: flex; flex-wrap: wrap; gap: 10px; } .print-card { border: 1px solid #ccc; padding: 5px; width: calc(50% - 10px); break-inside: avoid; } .print-row { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; }</style>"
+        header_part = st.session_state.get('current_header_html','')
+        rows_part = st.session_state.get('current_rows_html','')
+        
+        print_html = f"<html><head>{css_style}</head><body><h2>🗓 献立表</h2><table>{header_part}{rows_part}</table><h2>🛒 買い物リスト</h2><div class='print-container'>{cards_html}</div></body></html>"
         
         b64 = base64.b64encode(print_html.encode('utf-8')).decode('utf-8')
         components.html(f'<button id="pb" style="width:100%;background:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;">A4印刷用ページを開く</button><script>document.getElementById("pb").onclick=function(){{var w=window.open();w.document.write(atob("{b64}"));w.document.close();w.print();}};</script>', height=60)

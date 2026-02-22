@@ -35,10 +35,10 @@ import re
 # - [2026/02/22] 画面右上にログインIDとログアウトリンクを表示。
 # - [2026/02/22] 履歴データをユーザーごとに分離し、自分の履歴のみが操作可能。
 # - [2026/02/22] サイドバーを廃止し、2カラム構成にしない（無駄な領域を排除）。
-# - [2026/02/22] スマホ等でのログイン利便性向上のため、ネイティブHTML/JSによるオートコンプリート強制対応。
+# - [2026/02/22] スマホログイン時の利便性向上のため、標準text_inputのautocomplete属性最適化と隠しフォームによるブラウザ支援を実装。
 # ==============================================================================
 
-VERSION = "1.7.2"
+VERSION = "1.7.3"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -71,7 +71,7 @@ def save_to_github(content, filename, message, current_sha=None):
     res = requests.put(url, headers=headers, json=data)
     return res.status_code
 
-# --- 2. デザイン定義 (既存デザインを完全継承 + シングルカラム化) ---
+# --- 2. デザイン定義 ---
 st.set_page_config(page_title="献だけ", layout="centered", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -96,11 +96,6 @@ st.markdown("""
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     .edit-item-box { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; margin: 5px 0; }
-
-    /* ネイティブログインフォーム用CSS */
-    .native-login-container { background: #fff; padding: 20px; border-radius: 10px; border: 1px solid #eee; }
-    .native-input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; box-sizing: border-box; }
-    .native-button { width: 100%; padding: 12px; background: #262730; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -120,50 +115,33 @@ if not st.session_state['authenticated']:
     tab_log, tab_reg = st.tabs(["ログイン", "新規ユーザー登録"])
     
     with tab_log:
-        # ブラウザにパスワード保存を促すための隠しHTMLフォーム
-        login_html = """
-        <div class="native-login-container">
-            <form id="login-form" action="javascript:void(0);">
-                <label style="font-size:0.8rem; color:#666;">メールアドレス</label>
-                <input type="email" id="email" name="username" class="native-input" autocomplete="username" required>
-                <label style="font-size:0.8rem; color:#666;">パスワード</label>
-                <input type="password" id="password" name="password" class="native-input" autocomplete="current-password" required>
-                <button type="submit" class="native-button">ログイン</button>
+        # ブラウザにパスワード保存を認識させるためのダミーフォーム
+        # これを画面上に置くことで、ブラウザのオートコンプリート機能を強制的に呼び出します
+        components.html("""
+            <form style="display:none;" action="/">
+                <input type="text" name="username" autocomplete="username">
+                <input type="password" name="password" autocomplete="current-password">
+                <input type="submit">
             </form>
-        </div>
-        <script>
-            const form = document.getElementById('login-form');
-            form.addEventListener('submit', function() {
-                const email = document.getElementById('email').value;
-                const pass = document.getElementById('password').value;
-                // Streamlitの隠しボタン経由で値を渡す
-                window.parent.postMessage({
-                    type: 'streamlit:setComponentValue',
-                    value: {email: email, pass: pass, trigger: Math.random()}
-                }, '*');
-            });
-        </script>
-        """
-        # HTMLコンポーネントでフォームを表示
-        login_data = components.html(login_html, height=280)
-        
-        # ログイン試行の監視
-        if login_data:
-            users, _ = get_users_data()
-            e = login_data.get("email")
-            p = login_data.get("pass")
-            if e in users and users[e] == p:
-                st.session_state['authenticated'] = True
-                st.session_state['user_email'] = e
-                st.rerun()
-            else:
-                st.error("認証に失敗しました。メールアドレスまたはパスワードを確認してください。")
+        """, height=0)
+
+        with st.form("login_form"):
+            # st.text_inputのautocomplete属性を明示的に指定
+            e = st.text_input("メールアドレス", key="l_email", autocomplete="username")
+            p = st.text_input("パスワード", type="password", key="l_pass", autocomplete="current-password")
+            if st.form_submit_button("ログイン", use_container_width=True):
+                users, _ = get_users_data()
+                if e in users and users[e] == p:
+                    st.session_state['authenticated'] = True
+                    st.session_state['user_email'] = e
+                    st.rerun()
+                else: st.error("認証に失敗しました")
     
     with tab_reg:
         with st.form("reg_form"):
-            ne = st.text_input("メールアドレス", autocomplete="email")
-            np = st.text_input("パスワード（半角英数字8文字以上）", type="password", autocomplete="new-password")
-            cp = st.text_input("確認用パスワード", type="password", autocomplete="new-password")
+            ne = st.text_input("メールアドレス", key="r_email", autocomplete="email")
+            np = st.text_input("パスワード（半角英数字8文字以上）", type="password", key="r_pass", autocomplete="new-password")
+            cp = st.text_input("確認用パスワード", type="password", key="r_conf", autocomplete="new-password")
             if st.form_submit_button("登録する", use_container_width=True):
                 if not re.match(r'^[a-zA-Z0-9]{8,}$', np): st.error("パスワード条件を満たしていません")
                 elif np != cp: st.error("パスワードが一致しません")

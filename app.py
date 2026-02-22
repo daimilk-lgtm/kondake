@@ -21,10 +21,11 @@ from datetime import datetime, timedelta
 # - uid列は完全に排除。
 # - 【最重要】修正時は必ず「全文」を出力すること。一部省略は厳禁。
 # - 【最重要】既存の細かい仕様（印刷、CSS等）は指示がない限り絶対に変えない。
-# - 【新ルール】ユーザーからの追加指示は、毎回このセクションに書き足して更新すること。
+# - ユーザーからの追加指示は、毎回このセクションに書き足して更新すること。
+# - [2026/02/22 追加] メモ欄を曜日ごとに個別入力可能とし、買い物リストに反映する。
 # ==============================================================================
 
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -124,11 +125,11 @@ with tab_plan:
         with day_tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
             day_menu = {cat: st.multiselect(cat, df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist(), key=f"s_{i}_{cat}", placeholder="選択...") for cat in cats}
-            weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
+            day_memo = st.text_input("この日のメモ", key=f"memo_{i}", placeholder="買い足すものなど...")
+            weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i], "memo": day_memo}
 
     list_memo_options = df_menu[df_menu["カテゴリー"] == "主菜2"]["料理名"].tolist()
     selected_memos = st.multiselect("定番アイテム", list_memo_options, key="list_memo_multi", placeholder="選択...")
-    memo = st.text_area("メモ", placeholder="買い物リストに追加したいもの...")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list = []
@@ -138,6 +139,8 @@ with tab_plan:
         for d_str, data in weekly_plan.items():
             v = data["menu"]
             w_str = data["weekday"]
+            d_memo = data["memo"]
+            
             m1 = ", ".join(v.get('主菜1', [])) if v.get('主菜1') else "-"
             s1 = ", ".join(v.get('副菜1', [])) if v.get('副菜1') else "-"
             s2 = ", ".join(v.get('副菜2', [])) if v.get('副菜2') else "-"
@@ -146,18 +149,21 @@ with tab_plan:
             
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m1}</td><td>{s_dish}</td></tr>'
             
+            # 料理からの材料抽出
             for dish_list in v.values():
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     all_ings_list.extend([x.strip() for x in str(ing_raw).replace("、", ",").split(",") if x.strip()])
+            
+            # 曜日別メモの反映
+            if d_memo:
+                all_ings_list.extend([x.strip() + " (メモ)" for x in d_memo.replace("、", ",").split(",") if x.strip()])
 
+        # 定番アイテムからの材料抽出
         for selected_dish in selected_memos:
             ing_raw_memo = df_menu[df_menu["料理名"] == selected_dish]["材料"].iloc[0]
             all_ings_list.extend([x.strip() for x in str(ing_raw_memo).replace("、", ",").split(",") if x.strip()])
-
-        if memo:
-            all_ings_list.extend([x.strip() + " (メモ)" for x in memo.replace("、", ",").replace("\n", ",").split(",") if x.strip()])
 
         if new_history_entries:
             df_combined_h = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()

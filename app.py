@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.2.1"  # 印刷エラー対策版
+VERSION = "1.2.3"  # メモ（複数選択リスト）版
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -107,13 +107,17 @@ with tab_plan:
             day_menu = {cat: st.selectbox(cat, ["なし"] + df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist(), key=f"s_{i}_{cat}") for cat in cats}
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i]}
 
+    # --- メモ（リスト）を複数選択形式に変更 ---
+    list_options = df_menu[df_menu["カテゴリー"] == "主菜2"]["料理名"].tolist()
+    selected_memos = st.multiselect("メモ (リスト)", list_options, key="list_memo_multi")
+
     memo = st.text_area("メモ", placeholder="買い物リストに追加したいもの...")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
-        new_history_entries = []
         all_ings_list = []
         rows_html = ""
         
+        # 週間献立の処理
         for d_str, data in weekly_plan.items():
             v = data["menu"]
             w_str = data["weekday"]
@@ -126,6 +130,13 @@ with tab_plan:
                     items = str(ing_raw).replace("、", ",").split(",")
                     all_ings_list.extend([x.strip() for x in items if x.strip()])
 
+        # --- 【修正】複数選択されたメモリストの全材料を反映 ---
+        for selected_dish in selected_memos:
+            ing_raw_memo = df_menu[df_menu["料理名"] == selected_dish]["材料"].iloc[0]
+            m_items = str(ing_raw_memo).replace("、", ",").split(",")
+            all_ings_list.extend([x.strip() for x in m_items if x.strip()])
+
+        # 自由記述メモの処理
         if memo:
             memo_items = memo.replace("、", ",").replace("\n", ",").split(",")
             for m_item in memo_items:

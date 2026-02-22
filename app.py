@@ -7,10 +7,9 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
 # --- 0. バージョン管理情報 ---
-VERSION = "1.2.6"
+VERSION = "1.2.7"
 
 # --- 1. 接続設定 ---
-# ここが現在のリポジトリ・ファイル名と完全に一致しているかご確認ください
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
@@ -122,7 +121,11 @@ with tab_plan:
             v = data["menu"]
             w_str = data["weekday"]
             m1 = ", ".join(v.get('主菜1', [])) if v.get('主菜1') else "-"
-            s_dish = f"{', '.join(v.get('副菜1', [])) or '-'}, {', '.join(v.get('副菜2', [])) or '-'}, {', '.join(v.get('汁物', [])) or '-'}"
+            s1 = ", ".join(v.get('副菜1', [])) if v.get('副菜1') else "-"
+            s2 = ", ".join(v.get('副菜2', [])) if v.get('副菜2') else "-"
+            sw = ", ".join(v.get('汁物', [])) if v.get('汁物') else "-"
+            s_dish = f"{s1}, {s2}, {sw}"
+            
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m1}</td><td>{s_dish}</td></tr>'
             
             for dish_list in v.values():
@@ -161,6 +164,21 @@ with tab_plan:
             st.markdown("### 🛒 買い物リスト")
             st.markdown(cards_html, unsafe_allow_html=True)
 
+            # 印刷用構築
+            raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'><tr><th>日付</th><th>主菜</th><th>副菜・汁物</th></tr>{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
+            b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
+            components.html(f"""
+                <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷する</button></div>
+                <script>
+                document.getElementById('pbtn').onclick = function() {{
+                    var html = atob('{b64_html}');
+                    var w = window.open('', '_blank');
+                    w.document.open(); w.document.write(decodeURIComponent(escape(html))); w.document.close();
+                    setTimeout(function() {{ w.focus(); w.print(); }}, 500);
+                }};
+                </script>
+            """, height=80)
+
 with tab_hist:
     st.subheader("過去の履歴")
     if not df_hist.empty:
@@ -179,5 +197,17 @@ with tab_manage:
             if st.form_submit_button("変更を保存"):
                 df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [new_n, new_c, new_m]
                 save_to_github(df_menu, FILE, f"Update {edit_dish}", menu_sha)
+                st.cache_data.clear()
+                st.rerun()
+    st.divider()
+    with st.form("add_form"):
+        st.markdown("##### 新規追加")
+        n = st.text_input("料理名")
+        c = st.selectbox("カテゴリー", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"])
+        m = st.text_area("材料")
+        if st.form_submit_button("新規保存"):
+            if n and m:
+                new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
+                save_to_github(new_df, FILE, f"Add {n}", menu_sha)
                 st.cache_data.clear()
                 st.rerun()

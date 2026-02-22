@@ -30,11 +30,11 @@ from datetime import datetime, timedelta
 # - [2026/02/22] GitHub上に「draft.json」を作成し、入力内容を共有可能にする。
 # - [2026/02/22] 一時保存用の実行ボタン名は「一時保存」とする。
 # - [2026/02/22] 確定献立はカテゴリーごとに列を分ける。同一カテゴリーに複数ある場合は複数列に分割し、汁物は必ず右端の列に配置する。
-# - [2026/02/22] 買い物リストの各項目を個別に編集・削除できる機能を追加。
-# - [2026/02/22] 材料名が連結して表示される現象を修正（パース処理の強化）。
+# - [2026/02/22] 買い物リストの各項目を個別に編集・削除できる機能を、スマホで直感的に操作できるボタン形式で実装。
+# - [2026/02/22] 材料名が連結して表示される現象を修正（材料パースロジックの強化）。
 # ==============================================================================
 
-VERSION = "1.4.2"
+VERSION = "1.4.3"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -104,9 +104,10 @@ st.markdown("""
     .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
     .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
     .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
-    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; }
-    .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; }
+    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; overflow-x: auto; display: block; }
+    .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
+    .edit-item-box { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; margin: 5px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -226,18 +227,19 @@ with tab_plan:
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
-                    # 材料名の分割ロジックを修正
-                    splitted = str(ing_raw).replace("、", ",").replace("\n", ",").split(",")
+                    # 材料分割ロジックの強化: 改行、読点、コンマ、全角スペース、中黒で分割
+                    import re
+                    splitted = re.split(r'[、,\n\s・/]+', str(ing_raw))
                     all_ings_list.extend([x.strip() for x in splitted if x.strip()])
             
             if d_memo:
                 memo_prefix = f"{d_str}({w_str}) メモ: "
-                splitted_memo = d_memo.replace("、", ",").replace("\n", ",").split(",")
+                splitted_memo = re.split(r'[、,\n\s・/]+', d_memo)
                 all_ings_list.extend([memo_prefix + x.strip() for x in splitted_memo if x.strip()])
 
         for selected_dish in selected_memos:
             ing_raw_memo = df_menu[df_menu["料理名"] == selected_dish]["材料"].iloc[0]
-            splitted_定番 = str(ing_raw_memo).replace("、", ",").replace("\n", ",").split(",")
+            splitted_定番 = re.split(r'[、,\n\s・/]+', str(ing_raw_memo))
             all_ings_list.extend([x.strip() for x in splitted_定番 if x.strip()])
 
         if new_history_entries:
@@ -248,7 +250,6 @@ with tab_plan:
         st.session_state["current_rows_html"] = rows_html
         st.session_state["current_header_html"] = header_html
         
-        # 買い物リストの初期データ作成
         counts = pd.Series(all_ings_list).value_counts()
         init_shopping = []
         for item, count in counts.items():
@@ -259,51 +260,78 @@ with tab_plan:
                         if str(row["材料"]) in str(item): category = row["種別"]; break
             else:
                 category = "📝 各日メモ"
-            init_shopping.append({"項目": item, "個数": count, "カテゴリー": category, "表示名": f"{item} × {count}" if count > 1 else item})
-        st.session_state["shopping_list_df"] = pd.DataFrame(init_shopping)
+            init_shopping.append({"item": item, "count": count, "cat": category, "id": f"item_{len(init_shopping)}"})
+        st.session_state["shopping_list_data"] = init_shopping
 
-    if "shopping_list_df" in st.session_state:
+    if "shopping_list_data" in st.session_state:
         st.markdown("### 🗓 確定した献立")
         st.markdown(f'<table class="preview-table">{st.session_state["current_header_html"]}{st.session_state["current_rows_html"]}</table>', unsafe_allow_html=True)
 
-        st.markdown("### 🛒 買い物リストの編集")
-        st.info("項目名を書き換えたり、不要な行を削除してから下の印刷・表示に進んでください。")
+        st.markdown("### 🛒 買い物リストの調整")
         
-        # データフレームエディタで直接編集・削除を可能にする
-        edited_df = st.data_editor(
-            st.session_state["shopping_list_df"],
-            column_config={
-                "項目": st.column_config.TextColumn("材料・項目名", width="large"),
-                "個数": st.column_config.NumberColumn("数", min_value=1, step=1),
-                "カテゴリー": st.column_config.SelectboxColumn("カテゴリ", options=["肉・魚", "野菜", "乳製品・卵", "加工食品", "調味料", "📝 各日メモ", "99未分類"]),
-                "表示名": None # 自動生成するので非表示
-            },
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            key="shopping_editor"
-        )
-        st.session_state["shopping_list_df"] = edited_df
+        shopping_data = st.session_state["shopping_list_data"]
+        
+        # 編集・削除UI
+        categories = sorted(list(set(d["cat"] for d in shopping_data)))
+        new_shopping_data = []
+        
+        for cat in categories:
+            st.markdown(f"**【{cat}】**")
+            items_in_cat = [d for d in shopping_data if d["cat"] == cat]
+            
+            for item_obj in items_in_cat:
+                item_id = item_obj["id"]
+                col_text, col_edit, col_del = st.columns([6, 2, 2])
+                
+                # 削除フラグの管理
+                if f"del_{item_id}" in st.session_state and st.session_state[f"del_{item_id}"]:
+                    continue
 
-        # 最終表示用HTML生成
+                display_name = f"{item_obj['item']} × {item_obj['count']}" if item_obj['count'] > 1 else item_obj['item']
+                col_text.markdown(f"□ {display_name}")
+                
+                if col_edit.button("📝", key=f"btn_edit_{item_id}", help="修正"):
+                    st.session_state[f"editing_{item_id}"] = True
+                
+                if col_del.button("🗑️", key=f"btn_del_{item_id}", help="削除"):
+                    st.session_state[f"del_{item_id}"] = True
+                    st.rerun()
+
+                # 編集フォーム（スマホで操作しやすいように下に展開）
+                if st.session_state.get(f"editing_{item_id}", False):
+                    with st.container():
+                        st.markdown(f'<div class="edit-item-box">', unsafe_allow_html=True)
+                        new_name = st.text_input("項目名", value=item_obj["item"], key=f"inp_name_{item_id}")
+                        new_cnt = st.number_input("個数", value=int(item_obj["count"]), min_value=1, key=f"inp_cnt_{item_id}")
+                        new_cat = st.selectbox("カテゴリ", ["肉・魚", "野菜", "乳製品・卵", "加工食品", "調味料", "📝 各日メモ", "99未分類"], index=["肉・魚", "野菜", "乳製品・卵", "加工食品", "調味料", "📝 各日メモ", "99未分類"].index(item_obj["cat"]) if item_obj["cat"] in ["肉・魚", "野菜", "乳製品・卵", "加工食品", "調味料", "📝 各日メモ", "99未分類"] else 6, key=f"inp_cat_{item_id}")
+                        
+                        if st.button("適用", key=f"save_{item_id}"):
+                            item_obj["item"] = new_name
+                            item_obj["count"] = new_cnt
+                            item_obj["cat"] = new_cat
+                            st.session_state[f"editing_{item_id}"] = False
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                
+                new_shopping_data.append(item_obj)
+        
+        st.session_state["shopping_list_data"] = new_shopping_data
+
+        # 最終印刷用HTML生成
         cards_html = ""
-        if not edited_df.empty:
-            # 表示名の再計算
-            edited_df["final_name"] = edited_df.apply(lambda r: f"{r['項目']} × {r['個数']}" if int(r['個数']) > 1 else str(r['項目']), axis=1)
-            for cat, group in edited_df.sort_values("カテゴリー").groupby("カテゴリー"):
-                cards_html += f'<div class="shopping-card"><div class="category-label">{cat}</div>'
-                for _, row in group.iterrows():
-                    cards_html += f'<div class="item-row">□ {row["final_name"]}</div>'
-                cards_html += '</div>'
+        final_cats = sorted(list(set(d["cat"] for d in new_shopping_data)))
+        for c in final_cats:
+            cards_html += f'<div class="shopping-card"><div class="category-label">{c}</div>'
+            for row in [d for d in new_shopping_data if d["cat"] == c]:
+                f_name = f"{row['item']} × {row['count']}" if row['count'] > 1 else row['item']
+                cards_html += f'<div class="item-row">□ {f_name}</div>'
+            cards_html += '</div>'
         
         st.markdown("---")
-        st.markdown("### 🛒 最終買い物リスト")
-        st.markdown(cards_html, unsafe_allow_html=True)
-
         raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
         b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
         components.html(f"""
-            <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷する</button></div>
+            <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷・最終確認</button></div>
             <script>
             document.getElementById('pbtn').onclick = function() {{
                 var html = atob('{b64_html}');

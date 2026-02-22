@@ -31,9 +31,11 @@ except ImportError:
 # - [2026/02/22] 買い物リストの個別編集・削除・数量・A4印刷仕様を完全復元。
 # - [2026/02/22] 全文作成のルールは「各ファイル単位での全文作成」とする。
 # - [2026/02/22] 修正時はAIが段階的プロンプトを作成し、ユーザーが順次適用する。
+# - [2026/02/22] 買い物リストの名称を「買い物リスト」に統一。
+# - [2026/02/22] 狭い画面でも買い物リストの行が縦に割れないよう、CSSとレイアウトを最適化。
 # ==============================================================================
 
-VERSION = "1.7.3"
+VERSION = "1.7.4"
 FILE = "menu.csv"
 HIST_FILE = "history.csv"
 DRAFT_FILE = "draft.json"
@@ -57,6 +59,19 @@ st.markdown("""
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
     .edit-item-box { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 8px; margin: 5px 0; }
+    
+    /* 買い物リストの行が縦に割れないための制約 */
+    [data-testid="column"] {
+        min-width: 0px !important;
+        flex-basis: auto !important;
+    }
+    .shopping-row-container {
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap !important;
+        gap: 5px;
+        margin-bottom: 2px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -180,7 +195,7 @@ with tab_plan:
         st.markdown("### 🗓 確定した献立")
         st.markdown(f'<table class="preview-table">{st.session_state["current_header_html"]}{st.session_state["current_rows_html"]}</table>', unsafe_allow_html=True)
         
-        st.markdown("### 🛒 買い物リストの調整")
+        st.markdown("### 🛒 買い物リスト")
         s_data = st.session_state["shopping_list_data"]
         u_cats = sorted(list(set(d["cat"] for d in s_data)))
         
@@ -189,13 +204,16 @@ with tab_plan:
             for item_obj in [d for d in s_data if d["cat"] == c]:
                 i_id = item_obj["id"]
                 if st.session_state.get(f"del_{i_id}", False): continue
-                c1, c2, c3, c4 = st.columns([5, 1, 2, 2])
+                
+                # 横並びを維持するためのコンテナ（カラム比率調整）
+                c1, c2, c3, c4 = st.columns([6, 1, 1, 1])
                 c1.markdown(f"□ {item_obj['item']}")
                 c2.markdown(f"{item_obj['count']}" if item_obj['count'] > 1 else "")
                 if c3.button("📝", key=f"ed_{i_id}"): st.session_state[f"edit_{i_id}"] = True
                 if c4.button("🗑️", key=f"dl_{i_id}"): 
                     st.session_state[f"del_{i_id}"] = True
                     st.rerun()
+
                 if st.session_state.get(f"edit_{i_id}", False):
                     with st.container():
                         st.markdown('<div class="edit-item-box">', unsafe_allow_html=True)

@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import base64
 import io
+import json
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
@@ -26,48 +27,57 @@ from datetime import datetime, timedelta
 # - [2026/02/22] 買い物リスト反映時、メモ内容に「日付・曜日」を付記すること。
 # - [2026/02/22] 読み込み失敗時、エラーを握りつぶさずStatus Codeやレスポンス詳細を表示。
 # - [2026/02/22] 献立入力時、選択した曜日タブが勝手に切り替わらないよう操作性を維持する。
+# - [2026/02/22] GitHub上に「draft.json」を作成し、入力中の内容を一時保存・共有可能にする。
 # ==============================================================================
 
-VERSION = "1.3.6"
+VERSION = "1.3.8"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
 FILE = "menu.csv"
 DICT_FILE = "ingredients.csv"
 HIST_FILE = "history.csv"
+DRAFT_FILE = "draft.json"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-def get_menu_data():
-    """メニューデータを取得。失敗時はエラーの詳細を画面に出力する。"""
-    url = f"https://api.github.com/repos/{REPO}/contents/{FILE}"
+def get_github_content(filename):
+    """GitHubからファイルを取得する汎用関数"""
+    url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
     headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
     try:
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
-            raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
-            df = pd.read_csv(io.StringIO(raw))
-            return df, r.json()["sha"]
-        else:
-            st.error(f"GitHub読み込みエラー (Status: {r.status_code})")
-            st.info(f"アクセス先: {REPO}/{FILE}")
-            st.write("レスポンス内容:", r.text)
-            return None, None
-    except Exception as e:
-        st.error(f"通信エラーが発生しました: {e}")
+            content = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
+            return content, r.json()["sha"]
+    except: pass
+    return None, None
+
+def save_to_github(content, filename, message, current_sha=None):
+    """GitHubへファイルを保存する汎用関数"""
+    content_b64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
+    headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    data = {"message": message, "content": content_b64}
+    if current_sha: data["sha"] = current_sha
+    res = requests.put(url, headers=headers, json=data)
+    return res.status_code
+
+def get_menu_data():
+    content, sha = get_github_content(FILE)
+    if content:
+        df = pd.read_csv(io.StringIO(content))
+        return df, sha
+    else:
+        st.error("GitHubからのメニュー取得に失敗しました。設定を確認してください。")
         return None, None
 
 @st.cache_data(ttl=60)
 def get_history_data():
-    url = f"https://api.github.com/repos/{REPO}/contents/{HIST_FILE}"
-    headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    try:
-        r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
-            df_h = pd.read_csv(io.StringIO(raw))
-            if "uid" in df_h.columns: df_h = df_h.drop(columns=["uid"])
-            return df_h, r.json()["sha"]
-    except: pass
+    content, sha = get_github_content(HIST_FILE)
+    if content:
+        df_h = pd.read_csv(io.StringIO(content))
+        if "uid" in df_h.columns: df_h = df_h.drop(columns=["uid"])
+        return df_h, sha
     return pd.DataFrame(columns=["日付", "曜日", "料理名"]), None
 
 @st.cache_data(ttl=60)
@@ -76,16 +86,6 @@ def get_dict_data():
         url = f"https://raw.githubusercontent.com/{REPO}/main/{DICT_FILE}"
         return pd.read_csv(url)
     except: return None
-
-def save_to_github(df, filename, message, current_sha=None):
-    csv_content = df.to_csv(index=False, encoding="utf-8-sig")
-    content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
-    url = f"https://api.github.com/repos/{REPO}/contents/{filename}"
-    headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    data = {"message": message, "content": content_b64}
-    if current_sha: data["sha"] = current_sha
-    res = requests.put(url, headers=headers, json=data)
-    return res.status_code
 
 # --- 2. デザイン定義 ---
 st.set_page_config(page_title="献だけ", layout="centered")
@@ -108,10 +108,14 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
-# データの取得実行
+# データの取得
 df_menu, menu_sha = get_menu_data()
 df_dict = get_dict_data()
 df_hist, hist_sha = get_history_data()
+
+# 一時保存（Draft）の取得
+draft_content, draft_sha = get_github_content(DRAFT_FILE)
+draft_data = json.loads(draft_content) if draft_content else {}
 
 if df_menu is None:
     st.stop() 
@@ -126,7 +130,6 @@ with tab_plan:
     start_date = st.date_input("開始日（日）", value=default_sun)
     day_labels = ["日", "月", "火", "水", "木", "金", "土"]
     
-    # セッション状態でタブの選択を管理し、勝手な戻りを防ぐ
     days_tabs = st.tabs([f"{day_labels[i]}" for i in range(7)])
     weekly_plan = {}
     
@@ -135,12 +138,56 @@ with tab_plan:
         d_str = target_date.strftime("%Y/%m/%d")
         with day_tab:
             st.markdown(f"##### {d_str} ({day_labels[i]})")
-            day_menu = {cat: st.multiselect(cat, df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist(), key=f"s_{i}_{cat}", placeholder="選択...") for cat in cats}
-            day_memo = st.text_input("この日のメモ", key=f"memo_{i}", placeholder="買い足すものなど...")
+            
+            day_menu = {}
+            for cat in cats:
+                key_name = f"s_{i}_{cat}"
+                # 一時保存データがあれば初期値として使用
+                default_val = draft_data.get(key_name, [])
+                day_menu[cat] = st.multiselect(
+                    cat, 
+                    df_menu[df_menu["カテゴリー"] == cat]["料理名"].tolist(), 
+                    key=key_name, 
+                    default=[v for v in default_val if v in df_menu["料理名"].tolist()],
+                    placeholder="選択..."
+                )
+            
+            memo_key = f"memo_{i}"
+            day_memo = st.text_input(
+                "この日のメモ", 
+                key=memo_key, 
+                value=draft_data.get(memo_key, ""),
+                placeholder="買い足すものなど..."
+            )
             weekly_plan[d_str] = {"menu": day_menu, "weekday": day_labels[i], "memo": day_memo}
 
     list_memo_options = df_menu[df_menu["カテゴリー"] == "主菜2"]["料理名"].tolist()
-    selected_memos = st.multiselect("定番アイテム", list_memo_options, key="list_memo_multi", placeholder="選択...")
+    # 定番アイテムの一時保存反映
+    def_memos = draft_data.get("list_memo_multi", [])
+    selected_memos = st.multiselect(
+        "定番アイテム", 
+        list_memo_options, 
+        key="list_memo_multi", 
+        default=[v for v in def_memos if v in list_memo_options],
+        placeholder="選択..."
+    )
+
+    col_save, col_clear = st.columns(2)
+    with col_save:
+        if st.button("GitHubへ一時保存", use_container_width=True):
+            # 現在のセッション状態（入力内容）を保存用辞書にまとめる
+            current_draft = {}
+            for i in range(7):
+                for cat in cats:
+                    current_draft[f"s_{i}_{cat}"] = st.session_state[f"s_{i}_{cat}"]
+                current_draft[f"memo_{i}"] = st.session_state[f"memo_{i}"]
+            current_draft["list_memo_multi"] = st.session_state["list_memo_multi"]
+            
+            res_code = save_to_github(json.dumps(current_draft, ensure_ascii=False), DRAFT_FILE, "Update draft", draft_sha)
+            if res_code in [200, 201]:
+                st.toast("入力を一時保存しました（他端末と同期可能）")
+            else:
+                st.error("保存に失敗しました。")
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list = []
@@ -176,7 +223,7 @@ with tab_plan:
 
         if new_history_entries:
             df_combined_h = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
-            save_to_github(df_combined_h, HIST_FILE, "Update history", hist_sha)
+            save_to_github(df_combined_h.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, "Update history", hist_sha)
             st.toast("履歴を保存しました")
 
         st.markdown("### 🗓 確定した献立")
@@ -193,7 +240,6 @@ with tab_plan:
                             if str(row["材料"]) in str(item): category = row["種別"]; break
                 else:
                     category = "📝 各日メモ"
-                
                 result_data.append({"name": f"{item} × {count}" if count > 1 else item, "cat": category})
             
             df_res = pd.DataFrame(result_data).sort_values("cat")
@@ -227,7 +273,7 @@ with tab_hist:
                 target_date = df_hist_display.iloc[selected_hist_idx]['日付']
                 target_name = df_hist_display.iloc[selected_hist_idx]['料理名']
                 df_hist = df_hist[~((df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name))]
-                save_to_github(df_hist, HIST_FILE, f"Delete history {target_date}", hist_sha)
+                save_to_github(df_hist.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, f"Delete history {target_date}", hist_sha)
                 st.cache_data.clear()
                 st.rerun()
         with col2:
@@ -236,10 +282,9 @@ with tab_hist:
                 target_date = df_hist_display.iloc[selected_hist_idx]['日付']
                 target_name = df_hist_display.iloc[selected_hist_idx]['料理名']
                 df_hist.loc[(df_hist['日付'] == target_date) & (df_hist['料理名'] == target_name), '料理名'] = new_hist_name
-                save_to_github(df_hist, HIST_FILE, f"Edit history {target_date}", hist_sha)
+                save_to_github(df_hist.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, f"Edit history {target_date}", hist_sha)
                 st.cache_data.clear()
                 st.rerun()
-        
         st.divider()
         st.dataframe(df_hist_display, use_container_width=True, hide_index=True)
 
@@ -255,7 +300,7 @@ with tab_manage:
             new_m = st.text_area("材料", value=current_data["材料"])
             if st.form_submit_button("変更を保存"):
                 df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [new_n, new_c, new_m]
-                save_to_github(df_menu, FILE, f"Update {edit_dish}", menu_sha)
+                save_to_github(df_menu.to_csv(index=False, encoding="utf-8-sig"), FILE, f"Update {edit_dish}", menu_sha)
                 st.cache_data.clear()
                 st.rerun()
     st.divider()
@@ -267,7 +312,7 @@ with tab_manage:
         if st.form_submit_button("新規保存"):
             if n and m:
                 new_df = pd.concat([df_menu, pd.DataFrame([[n, c, m]], columns=df_menu.columns)], ignore_index=True)
-                save_to_github(new_df, FILE, f"Add {n}", menu_sha)
+                save_to_github(new_df.to_csv(index=False, encoding="utf-8-sig"), FILE, f"Add {n}", menu_sha)
                 st.cache_data.clear()
                 st.rerun()
 

@@ -42,10 +42,10 @@ import string
 # - [2026/02/22] スマホログイン時の利便性向上のため、標準text_inputのautocomplete属性最適化と隠しフォームによるブラウザ支援を実装。
 # - [2026/02/22] Gmail SMTPサーバーを利用したパスワード再設定フロー（OTP送信方式）を実装。
 # - [2026/02/22] 印刷用HTMLの生成ロジックにおいて発生していたSyntaxErrorを、f-stringの修正により解消。
-# - [2026/02/22] ログイン画面下部のexpanderラベルに表示されていた「_arrow_right」等の表示バグを修正。
+# - [2026/02/22] ログイン画面下部の表示バグ(アイコンコード露出)に対し、標準expanderを廃止し、HTML/CSSによる独自UIへ抜本的変更を実施。
 # ==============================================================================
 
-VERSION = "1.7.9"
+VERSION = "1.8.0"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -124,6 +124,21 @@ st.markdown("""
     .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; overflow-x: auto; display: block; }
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
+    
+    /* 抜本的修正：独自デザインのパスワード再設定用リンク */
+    .custom-reset-link {
+        margin-top: 15px;
+        padding: 10px;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        text-align: center;
+        background-color: #fff;
+    }
+    .custom-reset-link a {
+        text-decoration: none;
+        color: #666;
+        font-size: 0.9rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -138,6 +153,8 @@ if 'reset_target_email' not in st.session_state:
     st.session_state['reset_target_email'] = ""
 if 'reset_otp' not in st.session_state:
     st.session_state['reset_otp'] = ""
+if 'show_forgot_pw' not in st.session_state:
+    st.session_state['show_forgot_pw'] = False
 
 def get_users_data():
     content, sha = get_github_content(USERS_FILE)
@@ -190,27 +207,39 @@ if not st.session_state['authenticated']:
                         st.rerun()
                     else: st.error("認証に失敗しました")
             
-            # 修正箇所: 画像の表示バグ(文字重なり)を回避するため、シンプルなテキストラベルに変更
-            with st.expander("パスワードを忘れた場合"):
-                re_email = st.text_input("登録メールアドレス", key="re_email_input")
-                if st.button("再設定コードを送信", type="primary", use_container_width=True):
-                    with st.status("送信処理中...") as status:
-                        users, _ = get_users_data()
-                        if re_email in users:
-                            otp = ''.join(random.choices(string.digits, k=6))
-                            success, msg = send_otp_email(re_email, otp)
-                            if success:
-                                st.session_state['reset_otp'] = otp
-                                st.session_state['reset_target_email'] = re_email
-                                st.session_state['reset_mode'] = "sent"
-                                status.update(label="送信成功！", state="complete")
-                                st.rerun()
+            # 抜本的解決策：バグの多い st.expander を廃止し、自作ボタンでフォームを切り替える方式に変更
+            if not st.session_state['show_forgot_pw']:
+                if st.button("パスワードを忘れた場合", key="toggle_forgot_pw", type="secondary", use_container_width=True):
+                    st.session_state['show_forgot_pw'] = True
+                    st.rerun()
+            else:
+                st.markdown("---")
+                st.markdown("##### パスワード再設定コードの送信")
+                re_email = st.text_input("登録メールアドレスを入力", key="re_email_input")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("再設定コードを送信", type="primary", use_container_width=True):
+                        with st.status("送信処理中...") as status:
+                            users, _ = get_users_data()
+                            if re_email in users:
+                                otp = ''.join(random.choices(string.digits, k=6))
+                                success, msg = send_otp_email(re_email, otp)
+                                if success:
+                                    st.session_state['reset_otp'] = otp
+                                    st.session_state['reset_target_email'] = re_email
+                                    st.session_state['reset_mode'] = "sent"
+                                    status.update(label="送信成功！", state="complete")
+                                    st.rerun()
+                                else:
+                                    status.update(label="送信失敗", state="error")
+                                    st.error(f"詳細エラー: {msg}")
                             else:
-                                status.update(label="送信失敗", state="error")
-                                st.error(f"詳細エラー: {msg}")
-                        else:
-                            status.update(label="未登録アドレス", state="error")
-                            st.error("登録されていないメールアドレスです")
+                                status.update(label="未登録アドレス", state="error")
+                                st.error("登録されていないメールアドレスです")
+                with c2:
+                    if st.button("ログインに戻る", use_container_width=True):
+                        st.session_state['show_forgot_pw'] = False
+                        st.rerun()
         
         with tab_reg:
             with st.form("reg_form"):

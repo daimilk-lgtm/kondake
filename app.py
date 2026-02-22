@@ -6,8 +6,25 @@ import io
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
-# --- 0. バージョン管理情報 ---
-VERSION = "1.2.8"
+# ==============================================================================
+# 【仕様定義書 / SPECIFICATIONS & USER REQUESTS】
+# ------------------------------------------------------------------------------
+# [基本仕様]
+# 1. 接続・保存機能 (Storage): GitHub API (menu.csv, history.csv, ingredients.csv).
+# 2. 献立作成ロジック (Planning): 主菜1, 副菜1, 副菜2, 汁物の4枠。
+# 3. 買い物リスト & 印刷 (Shopping & Print): カテゴリ別表示 & A4最適化印刷.
+# 4. 履歴管理 (History): 自動保存。履歴タブでの料理名修正・行削除機能。
+# 5. UI/UX: スマホ操作優先（キーボード自動起動防止、マルチセレクト維持）。
+#
+# [ユーザー個別依頼 & 運用ルール]
+# - 「主菜2」は献立作成枠から除外。定番アイテムとしてのみ再利用。
+# - uid列は完全に排除。
+# - 【最重要】修正時は必ず「全文」を出力すること。一部省略は厳禁。
+# - 【最重要】既存の細かい仕様（印刷、CSS等）は指示がない限り絶対に変えない。
+# - 【新ルール】ユーザーからの追加指示は、毎回このセクションに書き足して更新すること。
+# ==============================================================================
+
+VERSION = "1.3.1"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -182,7 +199,7 @@ with tab_plan:
 with tab_hist:
     st.subheader("📜 履歴の管理")
     if not df_hist.empty:
-        df_hist_display = df_hist.copy().sort_values("日付", ascending=False)
+        df_hist_display = df_hist.copy().sort_values(["日付", "料理名"], ascending=[False, True])
         selected_hist_idx = st.selectbox("修正・削除するデータを選択", range(len(df_hist_display)), format_func=lambda i: f"{df_hist_display.iloc[i]['日付']} - {df_hist_display.iloc[i]['料理名']}")
         
         col1, col2 = st.columns(2)
@@ -206,8 +223,6 @@ with tab_hist:
         
         st.divider()
         st.dataframe(df_hist_display, use_container_width=True, hide_index=True)
-    else:
-        st.info("履歴がありません。")
 
 with tab_manage:
     st.subheader("⚙️ メニュー管理")

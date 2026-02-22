@@ -21,11 +21,12 @@ from datetime import datetime, timedelta
 # - uid列は完全に排除。
 # - 【最重要】修正時は必ず「全文」を出力すること。一部省略は厳禁。
 # - 【最重要】既存の細かい仕様（印刷、CSS等）は指示がない限り絶対に変えない。
-# - ユーザーからの追加指示は、毎回このセクションに書き足して更新すること。
-# - [2026/02/22 追加] メモ欄を曜日ごとに個別入力可能とし、買い物リストに反映する。
+# - 【最重要】ユーザーからの追加指示は、毎回このセクションに書き足して更新すること。
+# - [2026/02/22] メモ欄を曜日ごとに個別入力可能とし、買い物リストに反映。
+# - [2026/02/22] 読み込み失敗時、エラーを握りつぶさずStatus Codeやレスポンス詳細を表示。
 # ==============================================================================
 
-VERSION = "1.3.2"
+VERSION = "1.3.4"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -34,24 +35,30 @@ DICT_FILE = "ingredients.csv"
 HIST_FILE = "history.csv"
 TOKEN = st.secrets.get("GITHUB_TOKEN")
 
-@st.cache_data(ttl=60)
 def get_menu_data():
+    """メニューデータを取得。失敗時はエラーの詳細を画面に出力する。"""
+    url = f"https://api.github.com/repos/{REPO}/contents/{FILE}"
+    headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
     try:
-        url = f"https://api.github.com/repos/{REPO}/contents/{FILE}"
-        headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
             df = pd.read_csv(io.StringIO(raw))
             return df, r.json()["sha"]
-    except: pass
-    return None, None
+        else:
+            st.error(f"GitHub読み込みエラー (Status: {r.status_code})")
+            st.info(f"アクセス先: {REPO}/{FILE}")
+            st.write("レスポンス内容:", r.text)
+            return None, None
+    except Exception as e:
+        st.error(f"通信エラーが発生しました: {e}")
+        return None, None
 
 @st.cache_data(ttl=60)
 def get_history_data():
+    url = f"https://api.github.com/repos/{REPO}/contents/{HIST_FILE}"
+    headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
     try:
-        url = f"https://api.github.com/repos/{REPO}/contents/{HIST_FILE}"
-        headers = {"Authorization": f"token {TOKEN}", "Accept": "application/vnd.github.v3+json"}
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             raw = base64.b64decode(r.json()["content"]).decode("utf-8-sig")
@@ -99,13 +106,13 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">献だけ</h1>', unsafe_allow_html=True)
 
+# データの取得実行
 df_menu, menu_sha = get_menu_data()
 df_dict = get_dict_data()
 df_hist, hist_sha = get_history_data()
 
 if df_menu is None:
-    st.error("データの読み込みに失敗しました。")
-    st.stop()
+    st.stop() 
 
 cats = ["主菜1", "副菜1", "副菜2", "汁物"]
 tab_plan, tab_hist, tab_manage = st.tabs(["🗓 献立作成", "📜 履歴", "⚙️ メニュー管理"])
@@ -149,18 +156,15 @@ with tab_plan:
             
             rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m1}</td><td>{s_dish}</td></tr>'
             
-            # 料理からの材料抽出
             for dish_list in v.values():
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     all_ings_list.extend([x.strip() for x in str(ing_raw).replace("、", ",").split(",") if x.strip()])
             
-            # 曜日別メモの反映
             if d_memo:
                 all_ings_list.extend([x.strip() + " (メモ)" for x in d_memo.replace("、", ",").split(",") if x.strip()])
 
-        # 定番アイテムからの材料抽出
         for selected_dish in selected_memos:
             ing_raw_memo = df_menu[df_menu["料理名"] == selected_dish]["材料"].iloc[0]
             all_ings_list.extend([x.strip() for x in str(ing_raw_memo).replace("、", ",").split(",") if x.strip()])

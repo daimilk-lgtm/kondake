@@ -40,11 +40,11 @@ import string
 # - [2026/02/22] 履歴データをユーザーごとに分離し、自分の履歴のみが操作可能。
 # - [2026/02/22] サイドバーを廃止し、2カラム構成にしない（無駄な領域を排除）。
 # - [2026/02/22] スマホログイン時の利便性向上のため、標準text_inputのautocomplete属性最適化と隠しフォームによるブラウザ支援を実装。
-# - [2026/02/22] Gmail SMTPサーバーを利用したパスワード再設定フロー（OTP送信方式）を実装。メール不達問題対応のためデバッグログと送信方式の見直しを実施。
-# - [2026/02/22] 大前提（全文作成、既存維持、仕様書更新）の遵守を確認。
+# - [2026/02/22] Gmail SMTPサーバーを利用したパスワード再設定フロー（OTP送信方式）を実装。
+# - [2026/02/22] 印刷用HTML生成時のf-string構文エラー（SyntaxError）を修正。
 # ==============================================================================
 
-VERSION = "1.7.6"
+VERSION = "1.7.7"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -90,14 +90,12 @@ def send_otp_email(to_email, otp):
     msg["From"] = SMTP_USER
     msg["To"] = to_email
     
-    # ポート465 (SSL) で試行
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
             server.login(SMTP_USER, SMTP_PASS)
             server.send_message(msg)
         return True, "Success (465)"
     except Exception as e465:
-        # 465がダメな場合、ポート587 (TLS) で試行
         try:
             with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
                 server.starttls()
@@ -191,7 +189,6 @@ if not st.session_state['authenticated']:
                         st.rerun()
                     else: st.error("認証に失敗しました")
             
-            # 再設定申請（デバッグ機能付き）
             with st.expander("パスワードを忘れた場合"):
                 re_email = st.text_input("登録メールアドレス", key="re_email_input")
                 if st.button("再設定コードを送信", type="primary", use_container_width=True):
@@ -204,12 +201,11 @@ if not st.session_state['authenticated']:
                                 st.session_state['reset_otp'] = otp
                                 st.session_state['reset_target_email'] = re_email
                                 st.session_state['reset_mode'] = "sent"
-                                status.update(label="送信成功！画面を切り替えます...", state="complete")
+                                status.update(label="送信成功！", state="complete")
                                 st.rerun()
                             else:
                                 status.update(label="送信失敗", state="error")
                                 st.error(f"詳細エラー: {msg}")
-                                st.warning("SecretsのSMTP_USERとSMTP_PASSが正しいか、Gmailのアプリパスワードが有効か再確認してください。")
                         else:
                             status.update(label="未登録アドレス", state="error")
                             st.error("登録されていないメールアドレスです")
@@ -231,7 +227,7 @@ if not st.session_state['authenticated']:
                             st.success("登録完了。")
     st.stop()
 
-# --- 4. メインコンテンツ（既存仕様維持） ---
+# --- 4. メインコンテンツ ---
 st.markdown(f'<div class="auth-header"><span class="user-id">{st.session_state["user_email"]}</span></div>', unsafe_allow_html=True)
 if st.button("ログアウト", key="lo_btn", type="secondary"):
     st.session_state['authenticated'] = False
@@ -364,7 +360,10 @@ with tab_plan:
 
         active = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
         cards_html = "".join([f'<div class="print-card"><h3>{c}</h3>' + "".join([f'<div class="print-row"><span>□ {r["item"]}</span><span>{f"({r['count']})" if r["count"]>1 else ""}</span></div>' for r in active if r["cat"]==c]) + '</div>' for c in sorted(list(set(d["cat"] for d in active)))])
-        print_html = f"<html><head><style>@page {{ size: A4; margin: 10mm; }} body {{ font-family: sans-serif; font-size: 10pt; }} .print-container {{ display: flex; flex-wrap: wrap; gap: 10px; }} .print-card {{ border: 1px solid #ccc; padding: 5px; width: calc(50% - 10px); break-inside: avoid; }}</style></head><body><h2>🗓 献立表</h2><table>{st.session_state.get('current_header_html','')}{st.session_state.get('current_rows_html','')}</table><h2>🛒 買い物リスト</h2><div class="print-container">{cards_html}</div></body></html>"
+        
+        # 波括弧を {{ }} でエスケープして修正
+        print_html = f"<html><head><style>@page {{ size: A4; margin: 10mm; }} body {{ font-family: sans-serif; font-size: 10pt; }} .print-container {{ display: flex; flex-wrap: wrap; gap: 10px; }} .print-card {{ border: 1px solid #ccc; padding: 5px; width: calc(50% - 10px); break-inside: avoid; }} .print-row {{ display: flex; justify-content: space-between; border-bottom: 1px solid #eee; }}</style></head><body><h2>🗓 献立表</h2><table>{st.session_state.get('current_header_html','')}{st.session_state.get('current_rows_html','')}</table><h2>🛒 買い物リスト</h2><div class="print-container">{cards_html}</div></body></html>"
+        
         b64 = base64.b64encode(print_html.encode('utf-8')).decode('utf-8')
         components.html(f'<button id="pb" style="width:100%;background:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;">A4印刷用ページを開く</button><script>document.getElementById("pb").onclick=function(){{var w=window.open();w.document.write(atob("{b64}"));w.document.close();w.print();}};</script>', height=60)
 

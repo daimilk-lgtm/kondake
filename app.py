@@ -29,10 +29,10 @@ from datetime import datetime, timedelta
 # - [2026/02/22] 献立入力時、選択した曜日タブが勝手に切り替わらないよう操作性を維持する。
 # - [2026/02/22] GitHub上に「draft.json」を作成し、入力内容を共有可能にする。
 # - [2026/02/22] 一時保存用の実行ボタン名は「一時保存」とする。
-# - [2026/02/22] 確定献立の表を「主菜1」「副菜1」「副菜2」「汁物」の各1列ずつに分け、汁物を右端にする。
+# - [2026/02/22] 確定献立はカテゴリーごとに列を分ける。同一カテゴリーに複数ある場合は複数列に分割し、汁物は必ず右端の列に配置する。
 # ==============================================================================
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -190,22 +190,43 @@ with tab_plan:
 
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list = []
-        rows_html = ""
         new_history_entries = []
         
+        # 動的な列数を計算（最大値を取得）
+        max_counts = {"主菜1": 1, "副菜1": 1, "副菜2": 1, "汁物": 1}
+        for d_str, data in weekly_plan.items():
+            for cat in cats:
+                max_counts[cat] = max(max_counts[cat], len(data["menu"].get(cat, [])))
+
+        # テーブルヘッダーの生成
+        header_html = "<tr><th>日付</th>"
+        for cat in ["主菜1", "副菜1", "副菜2"]:
+            for j in range(max_counts[cat]):
+                suffix = f" {j+1}" if max_counts[cat] > 1 else ""
+                header_html += f"<th>{cat}{suffix}</th>"
+        for j in range(max_counts["汁物"]):
+            suffix = f" {j+1}" if max_counts["汁物"] > 1 else ""
+            header_html += f"<th>汁物{suffix}</th>"
+        header_html += "</tr>"
+
+        rows_html = ""
         for d_str, data in weekly_plan.items():
             v = data["menu"]
             w_str = data["weekday"]
             d_memo = data["memo"]
             
-            m1 = ", ".join(v.get('主菜1', [])) if v.get('主菜1') else "-"
-            f1 = ", ".join(v.get('副菜1', [])) if v.get('副菜1') else "-"
-            f2 = ", ".join(v.get('副菜2', [])) if v.get('副菜2') else "-"
-            sw = ", ".join(v.get('汁物', [])) if v.get('汁物') else "-"
+            row_content = f"<td>{d_str}({w_str})</td>"
             
-            # カテゴリーごとに1列に揃えたHTML行を生成。汁物は右端。
-            rows_html += f'<tr><td>{d_str}({w_str})</td><td>{m1}</td><td>{f1}</td><td>{f2}</td><td>{sw}</td></tr>'
+            # 各カテゴリーのセルを生成
+            for cat in ["主菜1", "副菜1", "副菜2", "汁物"]:
+                items = v.get(cat, [])
+                for j in range(max_counts[cat]):
+                    cell_val = items[j] if j < len(items) else "-"
+                    row_content += f"<td>{cell_val}</td>"
             
+            rows_html += f"<tr>{row_content}</tr>"
+            
+            # 履歴と材料の処理
             for dish_list in v.values():
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": w_str, "料理名": dish})
@@ -226,9 +247,7 @@ with tab_plan:
             st.toast("履歴を保存しました")
 
         st.markdown("### 🗓 確定した献立")
-        # テーブルヘッダーを修正
-        table_header = '<tr><th>日付</th><th>主菜1</th><th>副菜1</th><th>副菜2</th><th>汁物</th></tr>'
-        st.markdown(f'<table class="preview-table">{table_header}{rows_html}</table>', unsafe_allow_html=True)
+        st.markdown(f'<table class="preview-table">{header_html}{rows_html}</table>', unsafe_allow_html=True)
 
         if all_ings_list:
             counts = pd.Series(all_ings_list).value_counts()
@@ -248,19 +267,7 @@ with tab_plan:
             st.markdown("### 🛒 買い物リスト")
             st.markdown(cards_html, unsafe_allow_html=True)
 
-            # 印刷用HTMLも列分け構成に更新
-            raw_html = f"""
-            <html>
-            <body style='font-family:sans-serif;padding:20px;'>
-                <h2>🗓 献立</h2>
-                <table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>
-                    {table_header}{rows_html}
-                </table>
-                <h2>🛒 買い物リスト</h2>
-                {cards_html}
-            </body>
-            </html>
-            """
+            raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>{header_html}{rows_html}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
             b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
             components.html(f"""
                 <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷する</button></div>

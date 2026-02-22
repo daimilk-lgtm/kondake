@@ -48,9 +48,10 @@ import os
 # - [2026/02/22] 再設定フロー中の表示バグに対し、標準st.status/st.errorを廃止し、独自Markdown表示に切り替え。
 # - [2026/02/22] セキュリティ向上のため、パスワード保存方式をPBKDF2（SHA256）によるハッシュ化方式に変更。
 # - [2026/02/22] 確定献立表のヘッダーを「メニュー1, メニュー2...」の通し番号形式に変更し、最後を「汁物」に固定。
+# - [2026/02/22] 買い物リストのレイアウトを、情報密度の高いテーブル形式に変更。ボタンをテキスト形式にし行間を圧縮。
 # ==============================================================================
 
-VERSION = "1.9.1"
+VERSION = "1.9.2"
 
 # --- 1. 接続・認証設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -103,7 +104,7 @@ def save_to_github(content, filename, message, current_sha=None):
 
 def send_otp_email(to_email, otp):
     if not SMTP_USER or not SMTP_PASS:
-        return False, "SecretsにSMTP_USERまたはSMTP_PASS?が設定されていません。"
+        return False, "SecretsにSMTP_USERまたはSMTP_PASSが設定されていません。"
     
     msg = MIMEText(f"献だけ：パスワード再設定用のワンタイムパスコードは 【 {otp} 】 です。")
     msg["Subject"] = "【献だけ】パスワード再設定コード"
@@ -143,6 +144,13 @@ st.markdown("""
     .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; overflow-x: auto; display: block; }
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
+    
+    /* 買い物リスト用テーブルスタイル */
+    .shopping-list-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 5px; }
+    .shopping-list-table td { padding: 4px 2px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    .col-item { width: auto; }
+    .col-count { width: 30px; text-align: right; color: #666; padding-right: 8px !important; }
+    .col-action { width: 45px; text-align: center; }
     
     .custom-error {
         color: #ff4b4b;
@@ -366,55 +374,33 @@ with tab_plan:
     if st.button("確定して買い物リストを生成", type="primary", use_container_width=True):
         all_ings_list = []
         new_history_entries = []
-        
-        # 最大カラム数の計算（汁物以外）
         max_menu_cols = 0
         for d in weekly_plan.values():
             non_soup_count = sum(len(d["menu"].get(c, [])) for c in ["主菜1", "副菜1", "副菜2"])
             max_menu_cols = max(max_menu_cols, non_soup_count)
-            
-        # ヘッダー生成
         header_html = "<tr><th>日付</th>"
-        for j in range(max_menu_cols):
-            header_html += f"<th>メニュー{j+1}</th>"
+        for j in range(max_menu_cols): header_html += f"<th>メニュー{j+1}</th>"
         header_html += "<th>汁物</th></tr>"
-        
-        # 行データ生成
         rows_html = ""
         for d_str, data in weekly_plan.items():
             row_content = f"<td>{d_str}({data['weekday']})</td>"
-            
-            # 汁物以外のメニューを統合
             non_soup_items = []
-            for c in ["主菜1", "副菜1", "副菜2"]:
-                non_soup_items.extend(data["menu"].get(c, []))
-            
-            # メニュー列の埋め込み
-            for j in range(max_menu_cols):
-                row_content += f"<td>{non_soup_items[j] if j < len(non_soup_items) else '-'}</td>"
-                
-            # 汁物列（最後）
+            for c in ["主菜1", "副菜1", "副菜2"]: non_soup_items.extend(data["menu"].get(c, []))
+            for j in range(max_menu_cols): row_content += f"<td>{non_soup_items[j] if j < len(non_soup_items) else '-'}</td>"
             soup_items = data["menu"].get("汁物", [])
             row_content += f"<td>{', '.join(soup_items) if soup_items else '-'}</td>"
-            
             rows_html += f"<tr>{row_content}</tr>"
-            
-            # 履歴・材料集計用
             for cat_name, dish_list in data["menu"].items():
                 for dish in dish_list:
                     new_history_entries.append({"日付": d_str, "曜日": data["weekday"], "料理名": dish, "user": st.session_state['user_email']})
                     ing_raw = df_menu[df_menu["料理名"] == dish]["材料"].iloc[0]
                     all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\s・/]+', str(ing_raw)) if x.strip()])
             if data["memo"]: all_ings_list.extend([f"{d_str}メモ: " + x.strip() for x in re.split(r'[、,\n\s・/]+', data["memo"]) if x.strip()])
-            
         for m_dish in selected_memos: all_ings_list.extend([x.strip() for x in re.split(r'[、,\n\s・/]+', str(df_menu[df_menu["料理名"] == m_dish]["材料"].iloc[0])) if x.strip()])
-        
         if new_history_entries:
             df_combined_h = pd.concat([df_hist, pd.DataFrame(new_history_entries)], ignore_index=True).drop_duplicates()
             save_to_github(df_combined_h.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, "Update history", hist_sha)
-        
         st.session_state["current_rows_html"], st.session_state["current_header_html"] = rows_html, header_html
-        
         counts = pd.Series(all_ings_list).value_counts()
         init_shopping = []
         for item, count in counts.items():
@@ -430,32 +416,42 @@ with tab_plan:
         st.markdown(f'<table class="preview-table">{st.session_state["current_header_html"]}{st.session_state["current_rows_html"]}</table>', unsafe_allow_html=True)
         s_data = st.session_state["shopping_list_data"]
         u_cats = sorted(list(set(d["cat"] for d in s_data)))
+        
         for c in u_cats:
             st.markdown(f"**【{c}】**")
+            # テーブルの開始
+            st.markdown('<table class="shopping-list-table">', unsafe_allow_html=True)
             for item_obj in [d for d in s_data if d["cat"] == c]:
                 i_id = item_obj["id"]
                 if st.session_state.get(f"del_{i_id}", False): continue
-                c1, c2, c3, c4 = st.columns([5, 1, 2, 2])
-                c1.markdown(f"□ {item_obj['item']}"); c2.markdown(f"{item_obj['count']}" if item_obj['count'] > 1 else "")
-                if c3.button("📝", key=f"ed_{i_id}"): st.session_state[f"edit_{i_id}"] = True
-                if c4.button("🗑️", key=f"dl_{i_id}"): st.session_state[f"del_{i_id}"] = True; st.rerun()
+                
+                # 行の構築 (HTMLとStreamlitボタンの混在を避けるため1行ずつcolumnsで構成)
+                c1, c2, c3, c4 = st.columns([10, 2, 2.5, 2.5])
+                with c1: st.markdown(f"{item_obj['item']}")
+                with c2: st.markdown(f"<div style='text-align:right; color:#666;'>{item_obj['count'] if item_obj['count'] > 1 else ''}</div>", unsafe_allow_html=True)
+                with c3:
+                    if st.button("編集", key=f"ed_{i_id}", help="内容を修正", use_container_width=True):
+                        st.session_state[f"edit_{i_id}"] = True
+                with c4:
+                    if st.button("削除", key=f"dl_{i_id}", help="リストから削除", use_container_width=True):
+                        st.session_state[f"del_{i_id}"] = True; st.rerun()
+                
+                # 編集フォーム（ボタン押下時に展開）
                 if st.session_state.get(f"edit_{i_id}", False):
-                    en = st.text_input("名称", value=item_obj["item"], key=f"in_n_{i_id}")
-                    ec = st.number_input("数", value=int(item_obj["count"]), min_value=1, key=f"in_q_{i_id}")
-                    if st.button("保存", key=f"sv_{i_id}"):
-                        for d in st.session_state["shopping_list_data"]:
-                            if d["id"] == i_id: d["item"], d["count"] = en, ec; break
-                        st.session_state[f"edit_{i_id}"] = False; st.rerun()
+                    with st.container():
+                        en = st.text_input("名称", value=item_obj["item"], key=f"in_n_{i_id}")
+                        ec = st.number_input("数", value=int(item_obj["count"]), min_value=1, key=f"in_q_{i_id}")
+                        if st.button("保存", key=f"sv_{i_id}"):
+                            for d in st.session_state["shopping_list_data"]:
+                                if d["id"] == i_id: d["item"], d["count"] = en, ec; break
+                            st.session_state[f"edit_{i_id}"] = False; st.rerun()
+            st.markdown('</table>', unsafe_allow_html=True)
 
         active = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
         cards_html = "".join([f'<div class="print-card"><h3>{c}</h3>' + "".join([f'<div class="print-row"><span>□ {r["item"]}</span><span>{f"({r['count']})" if r["count"]>1 else ""}</span></div>' for r in active if r["cat"]==c]) + '</div>' for c in sorted(list(set(d["cat"] for d in active)))])
-        
         css_style = "<style>@page { size: A4; margin: 10mm; } body { font-family: sans-serif; font-size: 10pt; } .print-container { display: flex; flex-wrap: wrap; gap: 10px; } .print-card { border: 1px solid #ccc; padding: 5px; width: calc(50% - 10px); break-inside: avoid; } .print-row { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; }</style>"
-        header_part = st.session_state.get('current_header_html','')
-        rows_part = st.session_state.get('current_rows_html','')
-        
+        header_part, rows_part = st.session_state.get('current_header_html',''), st.session_state.get('current_rows_html','')
         print_html = f"<html><head>{css_style}</head><body><h2>🗓 献立表</h2><table>{header_part}{rows_part}</table><h2>🛒 買い物リスト</h2><div class='print-container'>{cards_html}</div></body></html>"
-        
         b64 = base64.b64encode(print_html.encode('utf-8')).decode('utf-8')
         components.html(f'<button id="pb" style="width:100%;background:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;">A4印刷用ページを開く</button><script>document.getElementById("pb").onclick=function(){{var w=window.open();w.document.write(atob("{b64}"));w.document.close();w.print();}};</script>', height=60)
 
@@ -466,7 +462,7 @@ with tab_hist:
         sel_idx = st.selectbox("データ選択", range(len(disp)), format_func=lambda i: f"{disp.iloc[i]['日付']} - {disp.iloc[i]['料理名']}")
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("削除", use_container_width=True):
+            if st.button("削除履歴", use_container_width=True):
                 df_hist = df_hist[~((df_hist['日付']==disp.iloc[sel_idx]['日付'])&(df_hist['料理名']==disp.iloc[sel_idx]['料理名'])&(df_hist['user']==st.session_state['user_email']))]
                 save_to_github(df_hist.to_csv(index=False, encoding="utf-8-sig"), HIST_FILE, "Del hist", hist_sha); st.cache_data.clear(); st.rerun()
         with c2:
@@ -481,16 +477,14 @@ with tab_manage:
     if edit_dish != "未選択":
         cur = df_menu[df_menu["料理名"] == edit_dish].iloc[0]
         with st.form("ed_menu"):
-            nn = st.text_input("料理名", value=cur["料理名"])
-            nc = st.selectbox("カテゴリ", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"], index=["主菜1", "主菜2", "副菜1", "副菜2", "汁物"].index(cur["カテゴリー"]))
+            nn, nc = st.text_input("料理名", value=cur["料理名"]), st.selectbox("カテゴリ", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"], index=["主菜1", "主菜2", "副菜1", "副菜2", "汁物"].index(cur["カテゴリー"]))
             nm = st.text_area("材料", value=cur["材料"])
             if st.form_submit_button("更新"):
                 df_menu.loc[df_menu["料理名"] == edit_dish, ["料理名", "カテゴリー", "材料"]] = [nn, nc, nm]
                 save_to_github(df_menu.to_csv(index=False, encoding="utf-8-sig"), FILE, f"Upd: {nn}", menu_sha); st.cache_data.clear(); st.rerun()
     st.divider()
     with st.form("add_menu"):
-        an, ac = st.text_input("料理名"), st.selectbox("カテゴリ", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"])
-        am = st.text_area("材料")
+        an, ac, am = st.text_input("料理名"), st.selectbox("カテゴリ", ["主菜1", "主菜2", "副菜1", "副菜2", "汁物"]), st.text_area("材料")
         if st.form_submit_button("追加保存"):
             if an and am:
                 save_to_github(pd.concat([df_menu, pd.DataFrame([[an, ac, am]], columns=df_menu.columns)]).to_csv(index=False, encoding="utf-8-sig"), FILE, f"Add: {an}", menu_sha); st.cache_data.clear(); st.rerun()

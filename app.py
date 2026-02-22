@@ -34,9 +34,10 @@ import re
 # - [2026/02/22] 買い物リストの各項目を個別に編集・削除できる機能を、スマホで直感的に操作できるボタン形式で実装。
 # - [2026/02/22] 材料名が連結して表示される現象を修正（材料パースロジックの強化）。
 # - [2026/02/22] 買い物リスト編集時、元のカテゴリーを自動で引き継ぎ、勝手に「未分類」へ移動しないよう修正。編集項目からカテゴリー選択を削除。
+# - [2026/02/22] 買い物リストにおいて、材料の数量（個数）を独立した列として扱い、表示・編集・印刷に反映させる。
 # ==============================================================================
 
-VERSION = "1.4.5"
+VERSION = "1.4.6"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -105,7 +106,9 @@ st.markdown("""
     .main-title { font-weight: 100 !important; font-size: 3rem; text-align: center; margin: 40px 0; letter-spacing: 0.5rem; }
     .shopping-card { background: white; padding: 15px; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
     .category-label { font-size: 0.8rem; color: #999; margin-bottom: 5px; }
-    .item-row { font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
+    .item-row { display: flex; justify-content: space-between; font-size: 1.1rem; padding: 4px 0; border-bottom: 0.5px solid #f9f9f9; }
+    .item-name { flex-grow: 1; }
+    .item-qty { min-width: 50px; text-align: right; color: #666; margin-left: 10px; }
     .preview-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; margin-bottom: 20px; overflow-x: auto; display: block; }
     .preview-table th, .preview-table td { border: 1px solid #eee; padding: 6px; text-align: left; min-width: 80px; }
     .preview-table th { background-color: #fcfcfc; font-weight: 400; }
@@ -281,9 +284,9 @@ with tab_plan:
                 if st.session_state.get(f"del_{item_id}", False):
                     continue
 
-                col_text, col_edit, col_del = st.columns([6, 2, 2])
-                display_name = f"{item_obj['item']} × {item_obj['count']}" if item_obj['count'] > 1 else item_obj['item']
-                col_text.markdown(f"□ {display_name}")
+                col_text, col_qty, col_edit, col_del = st.columns([5, 1, 2, 2])
+                col_text.markdown(f"□ {item_obj['item']}")
+                col_qty.markdown(f"{item_obj['count']}" if item_obj['count'] > 1 else "")
                 
                 if col_edit.button("📝", key=f"btn_edit_{item_id}"):
                     st.session_state[f"editing_{item_id}"] = True
@@ -296,14 +299,12 @@ with tab_plan:
                     with st.container():
                         st.markdown(f'<div class="edit-item-box">', unsafe_allow_html=True)
                         e_name = st.text_input("項目名", value=item_obj["item"], key=f"inp_name_{item_id}")
-                        e_cnt = st.number_input("個数", value=int(item_obj["count"]), min_value=1, key=f"inp_cnt_{item_id}")
-                        # カテゴリーの編集項目は削除し、内部的に cat を引き継ぐ
+                        e_cnt = st.number_input("数量", value=int(item_obj["count"]), min_value=1, key=f"inp_qty_{item_id}")
                         if st.button("保存", key=f"save_{item_id}"):
                             for d in st.session_state["shopping_list_data"]:
                                 if d["id"] == item_id:
                                     d["item"] = e_name
                                     d["count"] = e_cnt
-                                    # カテゴリー(d["cat"])は変更せず維持
                                     break
                             st.session_state[f"editing_{item_id}"] = False
                             st.rerun()
@@ -316,12 +317,12 @@ with tab_plan:
         for c in display_cats:
             cards_html += f'<div class="shopping-card"><div class="category-label">{c}</div>'
             for row in [d for d in active_items if d["cat"] == c]:
-                f_name = f"{row['item']} × {row['count']}" if row['count'] > 1 else row['item']
-                cards_html += f'<div class="item-row">□ {f_name}</div>'
+                qty_str = f'<span class="item-qty">{row["count"]}</span>' if row["count"] > 1 else ''
+                cards_html += f'<div class="item-row"><span class="item-name">□ {row["item"]}</span>{qty_str}</div>'
             cards_html += '</div>'
         
         st.markdown("---")
-        raw_html = f"<html><body style='font-family:sans-serif;padding:20px;'><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
+        raw_html = f"<html><head><style>.shopping-card{{background:white;padding:10px;border-bottom:1px solid #eee;}}.category-label{{font-size:0.8em;color:#888;}}.item-row{{display:flex;justify-content:space-between;padding:3px 0;}}.item-qty{{margin-left:10px;}}</style></head><body><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
         b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
         components.html(f"""
             <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷・最終確認</button></div>

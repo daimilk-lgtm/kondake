@@ -35,9 +35,10 @@ import re
 # - [2026/02/22] 材料名が連結して表示される現象を修正（材料パースロジックの強化）。
 # - [2026/02/22] 買い物リスト編集時、元のカテゴリーを自動で引き継ぎ、勝手に「未分類」へ移動しないよう修正。編集項目からカテゴリー選択を削除。
 # - [2026/02/22] 買い物リストにおいて、材料の数量（個数）を独立した列として扱い、表示・編集・印刷に反映させる。
+# - [2026/02/22] 印刷設定を変更。A4一枚に収まるようレイアウトを最適化。文字サイズは約10ptを基準とし、余白や表の幅を調整。
 # ==============================================================================
 
-VERSION = "1.4.6"
+VERSION = "1.4.7"
 
 # --- 1. 接続設定 ---
 REPO = "daimilk-lgtm/kondake"
@@ -310,25 +311,55 @@ with tab_plan:
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 最終印刷用HTML
-        cards_html = ""
+        # 最終印刷用HTML (A4最適化レイアウト)
         active_items = [d for d in st.session_state["shopping_list_data"] if not st.session_state.get(f"del_{d['id']}", False)]
         display_cats = sorted(list(set(d["cat"] for d in active_items)))
+        
+        cards_html = ""
         for c in display_cats:
-            cards_html += f'<div class="shopping-card"><div class="category-label">{c}</div>'
+            cards_html += f'<div class="print-card"><h3>{c}</h3>'
             for row in [d for d in active_items if d["cat"] == c]:
-                qty_str = f'<span class="item-qty">{row["count"]}</span>' if row["count"] > 1 else ''
-                cards_html += f'<div class="item-row"><span class="item-name">□ {row["item"]}</span>{qty_str}</div>'
+                qty_val = f'({row["count"]})' if row["count"] > 1 else ''
+                cards_html += f'<div class="print-row"><span>□ {row["item"]}</span><span>{qty_val}</span></div>'
             cards_html += '</div>'
         
         st.markdown("---")
-        raw_html = f"<html><head><style>.shopping-card{{background:white;padding:10px;border-bottom:1px solid #eee;}}.category-label{{font-size:0.8em;color:#888;}}.item-row{{display:flex;justify-content:space-between;padding:3px 0;}}.item-qty{{margin-left:10px;}}</style></head><body><h2>🗓 献立</h2><table style='width:100%;border-collapse:collapse;margin-bottom:20px;' border='1'>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table><h2>🛒 買い物リスト</h2>{cards_html}</body></html>"
-        b64_html = base64.b64encode(raw_html.encode('utf-8')).decode('utf-8')
+        
+        print_html = f"""
+        <html>
+        <head>
+            <style>
+                @page {{ size: A4; margin: 10mm; }}
+                body {{ font-family: sans-serif; font-size: 10pt; line-height: 1.2; color: #333; }}
+                h2 {{ border-bottom: 2px solid #333; padding-bottom: 5px; margin-top: 15px; font-size: 14pt; }}
+                h3 {{ font-size: 11pt; margin: 8px 0 4px 0; background: #eee; padding: 2px 5px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }}
+                th, td {{ border: 1px solid #999; padding: 4px; text-align: left; word-wrap: break-word; font-size: 9pt; }}
+                th {{ background: #f2f2f2; }}
+                .print-container {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+                .print-card {{ border: 1px solid #ccc; padding: 5px; width: calc(33.3% - 12px); box-sizing: border-box; break-inside: avoid; }}
+                .print-row {{ display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding: 2px 0; }}
+                @media print {{
+                    .no-print {{ display: none; }}
+                    .print-card {{ width: calc(50% - 10px); }} /* 印刷時は2列にして高さを抑える */
+                }}
+            </style>
+        </head>
+        <body>
+            <h2>🗓 献立表</h2>
+            <table>{st.session_state['current_header_html']}{st.session_state['current_rows_html']}</table>
+            <h2>🛒 買い物リスト</h2>
+            <div class="print-container">{cards_html}</div>
+        </body>
+        </html>
+        """
+        
+        b64_print = base64.b64encode(print_html.encode('utf-8')).decode('utf-8')
         components.html(f"""
             <div style="margin-top:20px;"><button id="pbtn" style="width:100%;background-color:#262730;color:white;padding:12px;border:none;border-radius:8px;cursor:pointer;font-size:1rem;">A4印刷・最終確認</button></div>
             <script>
             document.getElementById('pbtn').onclick = function() {{
-                var html = atob('{b64_html}');
+                var html = atob('{b64_print}');
                 var w = window.open('', '_blank');
                 w.document.open(); w.document.write(decodeURIComponent(escape(html))); w.document.close();
                 setTimeout(function() {{ w.focus(); w.print(); }}, 500);
